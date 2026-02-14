@@ -1,0 +1,5 @@
+zenml[local]
+polars==1.37.0
+scikit-learn
+gensim
+matplotlib
