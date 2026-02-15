@@ -7,8 +7,8 @@ from sklearn.manifold import TSNE
 from gensim.models import Word2Vec
 
 @step
-def build_baskets() -> pl.DataFrame:
-    df = pl.scan_parquet("data/data.parquet")
+def build_baskets(df_path: str) -> pl.DataFrame:
+    df = pl.scan_parquet(df_path)
 
     baskets = (
         df
@@ -32,7 +32,7 @@ def data_split(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
     return train_df, test_df
 
 @step
-def train_model(train_df: pl.DataFrame) -> Word2Vec:
+def train_model(train_df: pl.DataFrame) -> str:
     sentences = PolarsBasketIterator(train_df)
     model = Word2Vec(
         sentences=sentences,
@@ -44,7 +44,9 @@ def train_model(train_df: pl.DataFrame) -> Word2Vec:
         min_count=2
     )
 
-    return model
+    model_path = "models/word2vec.model"
+    model.save(model_path)
+    return model_path
 
 class PolarsBasketIterator:
     def __init__(self, df):
@@ -55,7 +57,8 @@ class PolarsBasketIterator:
             yield row["basket"]
 
 @step
-def plot_all_items_2d(model, max_labels=60, random_state=43):
+def plot_all_items_2d(model_path, max_labels=60, random_state=43):
+    model = Word2Vec.load(model_path)
     items = list(model.wv.index_to_key)
     X = np.array([model.wv[pid] for pid in items])
 
