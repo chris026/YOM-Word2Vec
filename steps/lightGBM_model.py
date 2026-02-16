@@ -1,7 +1,8 @@
 from zenml import step
 import polars as pl
+import tqdm
 
-@step(enable_cache=False)
+@step
 def prepare_data(W2Vmodel_path: str, data_path, commerces_path, products_path):
     orders = pl.scan_parquet(data_path)
     commerces = pl.scan_parquet(commerces_path)
@@ -18,4 +19,3 @@ def prepare_data(W2Vmodel_path: str, data_path, commerces_path, products_path):
 
     print(pop_global.head(5).collect())
     print(pop_global.filter(pl.col("productid") == "000051-007").collect())
-    
