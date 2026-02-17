@@ -1,6 +1,5 @@
 from zenml import step
 import polars as pl
-import tqdm
 
 @step
 def prepare_data(W2Vmodel_path: str, data_path, commerces_path, products_path):
@@ -16,6 +15,3 @@ def prepare_data(W2Vmodel_path: str, data_path, commerces_path, products_path):
     pop_region = orders.group_by(["region","productid"]).agg(pl.count().alias("pop_region"))
     pop_subch = orders.group_by(["subchannel","productid"]).agg(pl.count().alias("pop_subch"))
     pop_origin = orders.group_by(["origin","productid"]).agg(pl.count().alias("pop_origin"))
-
-    print(pop_global.head(5).collect())
-    print(pop_global.filter(pl.col("productid") == "000051-007").collect())

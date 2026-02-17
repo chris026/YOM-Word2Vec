@@ -17,10 +17,11 @@ def run_pipeline():
     #steps.model.test_model(model)
 
     ranker_training_pipeline_fast(
-        orders_path="data/data.parquet",
+        orders_path="data/2024-20250001_part_00-001.parquet",
         commerces_path="data/commerces.parquet",
         products_path="data/products_v2.parquet",
         w2v_path="models/word2vec.model",
+        artifacts_dir="artifacts",
         topk=20,
     )
     
