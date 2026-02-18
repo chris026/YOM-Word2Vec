@@ -15,7 +15,8 @@ from zenml import step, pipeline
 
 def _artifact_path(base_dir: str, name: str, ext: str) -> str:
     os.makedirs(base_dir, exist_ok=True)
-    return os.path.join(base_dir, f"{name}_{uuid.uuid4().hex}.{ext}")
+    #return os.path.join(base_dir, f"{name}_{uuid.uuid4().hex}.{ext}")
+    return os.path.join(base_dir, f"{name}.{ext}")
 
 
 # ==============================
@@ -284,18 +285,17 @@ def train_ranker_from_files(
         objective="lambdarank",
         metric="ndcg",
         ndcg_eval_at=[5, 10],
-        n_estimators=600,
         learning_rate=0.05,
-        num_leaves=127,
-        min_data_in_leaf=50,
         subsample=0.8,
         colsample_bytree=0.8,
         reg_lambda=1.0,
-        random_state=42,
-        force_row_wise=True,
+        random_state=42
     )
 
     model.fit(X, y, group=groups)
+
+    model_path = "models/lgbm_ranker.txt"
+    model.booster_.save_model(model_path)
     return model
 
 
