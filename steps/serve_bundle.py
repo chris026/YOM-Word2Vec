@@ -10,7 +10,7 @@ from gensim.models import Word2Vec
 
 def load_models(w2v_path: str, lgbm_path: str):
     w2v = Word2Vec.load(w2v_path)
-    ranker = lgb.Booster(model_file=lgbm_path)  # wenn du Booster gespeichert hast
+    ranker = lgb.Booster(model_file=lgbm_path)
     return w2v, ranker
 
 

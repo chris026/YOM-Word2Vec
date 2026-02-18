@@ -132,16 +132,16 @@ def generate_candidates_fast_to_parquet(
             if anchor not in wv:
                 continue
 
-            anchor_vec = wv[anchor]
             retrieved = wv.most_similar(anchor, topn=topk)
-            retrieved_ids = [pid for pid, _ in retrieved]
+            sim_map = dict(retrieved)
+            retrieved_ids = sim_map.keys()
 
             candidates = set(retrieved_ids) | (basket_set - {anchor})
 
             for cand in candidates:
                 if cand not in wv:
                     continue
-                sim = float(np.dot(anchor_vec, wv[cand]))
+                sim = float(sim_map.get(cand, 0.0))
                 rows.append(
                     {
                         "orderid": orderid,
@@ -226,18 +226,20 @@ def build_training_dataset_to_files(
         .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
         .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
         .with_columns(
-            pl.col("pop_global").fill_null(0),
-            pl.col("pop_store").fill_null(0),
-            pl.col("pop_origin").fill_null(0),
-            pl.col("pop_region").fill_null(0),
-            pl.col("pop_subch").fill_null(0),
+            pl.col("pop_global").fill_null(0).log1p(),
+            pl.col("pop_store").fill_null(0).log1p(),
+            pl.col("pop_origin").fill_null(0).log1p(),
+            pl.col("pop_region").fill_null(0).log1p(),
+            pl.col("pop_subch").fill_null(0).log1p(),
         )
     )
+
+    ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
 
     # Groups
     groups = (
         ranker_lf
-        .group_by(["orderid", "anchor"])
+        .group_by(["orderid", "anchor"], maintain_order=True)
         .agg(pl.len().alias("group_size"))
         .select("group_size")
         .collect()
