@@ -5,3 +5,5 @@ gensim
 matplotlib
 tqdm
 lightgbm
+pandas
+pyarrow

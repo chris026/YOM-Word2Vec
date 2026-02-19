@@ -3,6 +3,7 @@ import uuid
 import polars as pl
 import numpy as np
 import lightgbm as lgb
+import pandas as pd
 
 from gensim.models import Word2Vec
 from tqdm import tqdm
@@ -234,6 +235,15 @@ def build_training_dataset_to_files(
         )
     )
 
+    ranker_lf = ranker_lf.with_columns(
+        pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8).alias("channel"),
+        pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8).alias("commune"),
+        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8).alias("origin"),
+        pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8).alias("region"),
+        pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8).alias("subchannel"),
+        pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
+    )
+
     ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
 
     # Groups
@@ -272,15 +282,36 @@ def train_ranker_from_files(
 
     feature_cols = [
         "sim_item2vec",
-        "same_category",
         "pop_global",
-        "pop_store",
-        "pop_region",
         "pop_subch",
         "pop_origin",
+        "pop_region",
+        "same_category",
+        "channel",
+        "pop_store",
+        "commune",
+        "cand_category",
+        "origin",
+        "region",
+        "subchannel",
+    ]
+    categorical_cols = [
+        "channel",
+        "commune",
+        "cand_category",
+        "origin",
+        "region",
+        "subchannel",
     ]
 
-    X = train_df.select(feature_cols).to_numpy()
+    train_pd = train_df.select(feature_cols + ["label"]).to_pandas()
+    for col in categorical_cols:
+        train_pd[col] = train_pd[col].fillna("UNKNOWN").astype("category")
+    for col in feature_cols:
+        if col not in categorical_cols:
+            train_pd[col] = pd.to_numeric(train_pd[col], errors="coerce").fillna(0.0).astype(np.float32)
+
+    X = train_pd[feature_cols]
     y = train_df.select("label").to_numpy().ravel()
 
     model = lgb.LGBMRanker(
@@ -294,7 +325,7 @@ def train_ranker_from_files(
         random_state=42
     )
 
-    model.fit(X, y, group=groups)
+    model.fit(X, y, group=groups, categorical_feature=categorical_cols)
 
     model_path = "models/lgbm_ranker.txt"
     model.booster_.save_model(model_path)

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import polars as pl
 import lightgbm as lgb
 from gensim.models import Word2Vec
@@ -7,6 +8,35 @@ from gensim.models import Word2Vec
 # -----------------------
 # Load artifacts
 # -----------------------
+
+FEATURE_COLS = [
+    "sim_item2vec",
+    "pop_global",
+    "pop_subch",
+    "pop_origin",
+    "pop_region",
+    "same_category",
+    "channel",
+    "pop_store",
+    "commune",
+    "cand_category",
+    "origin",
+    "region",
+    "subchannel",
+]
+
+CATEGORICAL_COLS = [
+    "channel",
+    "commune",
+    "cand_category",
+    "origin",
+    "region",
+    "subchannel",
+]
+
+
+def _to_key(v) -> str:
+    return str(v)
 
 def load_models(w2v_path: str, lgbm_path: str):
     w2v = Word2Vec.load(w2v_path)
@@ -32,7 +62,7 @@ def build_lookup_dicts(
 
     # store / product meta
     store_meta = {
-        r["userid"]: {
+        _to_key(r["userid"]): {
             "region": r["region"],
             "subchannel": r["subchannel"],
             "channel": r["channel"],
@@ -41,32 +71,32 @@ def build_lookup_dicts(
         for r in commerces.iter_rows(named=True)
     }
 
-    prod_cat = {r["productid"]: r["category"] for r in products.iter_rows(named=True)}
-    prod_blocked = {r["productid"]: bool(r["blocked"]) for r in products.iter_rows(named=True)}
+    prod_cat = {_to_key(r["productid"]): r["category"] for r in products.iter_rows(named=True)}
+    prod_blocked = {_to_key(r["productid"]): bool(r["blocked"]) for r in products.iter_rows(named=True)}
 
     # popularity lookup dicts
     pop_global = {
-        r["productid"]: int(r["pop_global"])
+        _to_key(r["productid"]): int(r["pop_global"])
         for r in pl.read_parquet(pop_global_path).iter_rows(named=True)
     }
 
     pop_store = {
-        (r["userid"], r["productid"]): int(r["pop_store"])
+        (_to_key(r["userid"]), _to_key(r["productid"])): int(r["pop_store"])
         for r in pl.read_parquet(pop_store_path).iter_rows(named=True)
     }
 
     pop_region = {
-        (r["region"], r["productid"]): int(r["pop_region"])
+        (_to_key(r["region"]), _to_key(r["productid"])): int(r["pop_region"])
         for r in pl.read_parquet(pop_region_path).iter_rows(named=True)
     }
 
     pop_subch = {
-        (r["subchannel"], r["productid"]): int(r["pop_subch"])
+        (_to_key(r["subchannel"]), _to_key(r["productid"])): int(r["pop_subch"])
         for r in pl.read_parquet(pop_subch_path).iter_rows(named=True)
     }
 
     pop_origin = {
-        (r["origin"], r["productid"]): int(r["pop_origin"])
+        (_to_key(r["origin"]), _to_key(r["productid"])): int(r["pop_origin"])
         for r in pl.read_parquet(pop_origin_path).iter_rows(named=True)
     }
 
@@ -95,14 +125,19 @@ def recommend_candidates(
     topn: int = 10,
     basket: set[str] | None = None,
 ):
-    basket = basket or set()
+    basket = {_to_key(x) for x in (basket or set())}
+    anchor = _to_key(anchor)
+    userid = _to_key(userid)
+    origin = _to_key(origin)
 
     if anchor not in w2v.wv:
         return []
 
     ctx = store_meta.get(userid, {})
-    region = ctx.get("region", "UNKNOWN")
-    subch = ctx.get("subchannel", "UNKNOWN")
+    region = _to_key(ctx.get("region", "UNKNOWN"))
+    subch = _to_key(ctx.get("subchannel", "UNKNOWN"))
+    channel = _to_key(ctx.get("channel", "UNKNOWN"))
+    commune = _to_key(ctx.get("commune", "UNKNOWN"))
 
     # 1) retrieve
     retrieved = w2v.wv.most_similar(anchor, topn=topk_retrieval)
@@ -110,6 +145,7 @@ def recommend_candidates(
     # 2) build candidate list with rank
     candidates = []
     for rank, (cand, sim) in enumerate(retrieved, start=1):
+        cand = _to_key(cand)
         if cand == anchor:
             continue
         if cand in basket:
@@ -125,11 +161,11 @@ def recommend_candidates(
         return []
 
     # 3) feature matrix
-    anchor_cat = prod_cat.get(anchor, "UNKNOWN")
+    anchor_cat = _to_key(prod_cat.get(anchor, "UNKNOWN"))
 
     rows = []
     for cand, r_rank, w2v_sim in candidates:
-        cand_cat = prod_cat.get(cand, "UNKNOWN")
+        cand_cat = _to_key(prod_cat.get(cand, "UNKNOWN"))
         same_cat = 1 if cand_cat == anchor_cat else 0
 
         pg = pop_global.get(cand, 0)
@@ -145,15 +181,30 @@ def recommend_candidates(
         psub = np.log1p(psub)
         po = np.log1p(po)
 
-        rows.append([
-            w2v_sim,           # sim_item2vec
-            same_cat,          # same_category
-            pg, ps, pr, psub, po
-            # + retrieval_rank feature, if you trained with it
-            # r_rank
-        ])
+        rows.append(
+            {
+                "sim_item2vec": w2v_sim,
+                "pop_global": pg,
+                "pop_subch": psub,
+                "pop_origin": po,
+                "pop_region": pr,
+                "same_category": same_cat,
+                "channel": channel,
+                "pop_store": ps,
+                "commune": commune,
+                "cand_category": cand_cat,
+                "origin": origin,
+                "region": region,
+                "subchannel": subch,
+            }
+        )
 
-    X = np.asarray(rows, dtype=np.float32)
+    X = pd.DataFrame(rows, columns=FEATURE_COLS)
+    for col in CATEGORICAL_COLS:
+        X[col] = X[col].fillna("UNKNOWN").astype("category")
+    for col in FEATURE_COLS:
+        if col not in CATEGORICAL_COLS:
+            X[col] = pd.to_numeric(X[col], errors="coerce").fillna(0.0).astype(np.float32)
 
     # 4) predict scores
     scores = ranker.predict(X)
@@ -175,6 +226,9 @@ def recommend_candidates(
 if __name__ == "__main__":
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
+    anchor_pid = "002302-002"
+    userid = "c32bf393ff6a79c15fa3677e621367c6"
+    origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
@@ -187,11 +241,15 @@ if __name__ == "__main__":
         pop_subch_path="artifacts/pop_subch.parquet",
         pop_origin_path="artifacts/pop_origin.parquet",
     )
+    prod_name = {
+        _to_key(r["productid"]): _to_key(r["name"])
+        for r in pl.read_parquet("data/products_v2.parquet").select(["productid", "name"]).iter_rows(named=True)
+    }
 
     recs = recommend_candidates(
-        anchor="000006-001",
-        userid="12345",
-        origin="RUTA",
+        anchor=anchor_pid,
+        userid=userid,
+        origin=origin,
         w2v=w2v,
         ranker=ranker,
         store_meta=store_meta,
@@ -207,4 +265,20 @@ if __name__ == "__main__":
         basket=set(),  # falls du gerade einen Warenkorb hast, hier rein
     )
 
-    print(recs)
+    anchor_pid = _to_key(anchor_pid)
+    anchor_name = prod_name.get(anchor_pid, "UNKNOWN")
+    print(f"Eingabeprodukt: {anchor_pid} | {anchor_name}")
+
+    recs_with_name = [
+        {
+            "productid": pid,
+            "name": prod_name.get(_to_key(pid), "UNKNOWN"),
+            "score": float(score),
+        }
+        for pid, score in recs
+    ]
+    recs_df = pd.DataFrame(recs_with_name, columns=["productid", "name", "score"])
+    if recs_df.empty:
+        print("Keine Empfehlungen gefunden.")
+    else:
+        print(recs_df.to_string(index=False))

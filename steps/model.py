@@ -31,12 +31,12 @@ def data_split(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
     test_df = baskets[split_idx:]
     return train_df, test_df
 
-@step
+@step(enable_cache=True)
 def train_model(train_df: pl.DataFrame) -> str:
     sentences = PolarsBasketIterator(train_df)
     model = Word2Vec(
         sentences=sentences,
-        vector_size=32,
+        vector_size=25,
         window=100,
         sg=1,
         shrink_windows=False,
