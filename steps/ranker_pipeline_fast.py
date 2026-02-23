@@ -159,7 +159,7 @@ def generate_candidates_fast_to_parquet(
 # ==============================
 
 @step
-def build_training_dataset_to_files(
+def build_training_dataset_to_files_OLD(
     candidates_path: str,
     baskets_path: str,
     commerces_path: str,
@@ -260,6 +260,128 @@ def build_training_dataset_to_files(
 
     train_path = _artifact_path(artifacts_dir, "train", "parquet")
     ranker_lf.collect().write_parquet(train_path)
+
+    return train_path, groups_path
+
+# ==============================
+# STEP 4 — BUILD TRAINING DATASET (joins + pops) -> PARQUET + GROUPS NPY
+# ==============================
+
+@step(enable_cache=False)
+def build_training_dataset_to_files(
+    candidates_path: str,
+    baskets_path: str,
+    commerces_path: str,
+    products_path: str,
+    pop_global_path: str,
+    pop_store_path: str,
+    pop_origin_path: str,
+    pop_region_path: str,
+    pop_subch_path: str,
+    artifacts_dir: str = "artifacts",
+) -> tuple[str, str]:
+
+    candidates_lf = pl.scan_parquet(candidates_path)
+    baskets_lf    = pl.scan_parquet(baskets_path)
+    commerces_lf  = pl.scan_parquet(commerces_path)
+    products_lf   = pl.scan_parquet(products_path)
+
+    pop_global_lf = pl.scan_parquet(pop_global_path)
+    pop_store_lf  = pl.scan_parquet(pop_store_path)
+    pop_origin_lf = pl.scan_parquet(pop_origin_path)
+    pop_region_lf = pl.scan_parquet(pop_region_path)
+    pop_subch_lf  = pl.scan_parquet(pop_subch_path)
+
+    # --- baskets: wie vorher "basket" als List-Spalte im Endresult behalten
+    basket_only_lf = baskets_lf.select(["orderid", "basket"])
+    baskets_meta_lf = baskets_lf.select(["orderid", "userid", "origin"])
+
+    # --- positives: (orderid, candidate) aus dem basket, zum Labeln per Join
+    positives_lf = (
+        baskets_lf
+        .select(["orderid", "basket"])
+        .explode("basket")
+        .rename({"basket": "candidate"})
+        .unique(["orderid", "candidate"])
+        .with_columns(pl.lit(1, dtype=pl.Int8).alias("label"))
+    )
+
+    # Base joins: candidates + basket + store meta
+    ranker_lf = (
+        candidates_lf
+        .join(basket_only_lf, on="orderid", how="left")
+        .join(positives_lf, on=["orderid", "candidate"], how="left")
+        .with_columns(pl.col("label").fill_null(0).cast(pl.Int8))
+        .join(baskets_meta_lf, on="orderid", how="left")
+        .join(commerces_lf, on="userid", how="left")
+    )
+
+    # Candidate product meta
+    ranker_lf = ranker_lf.join(
+        products_lf,
+        left_on="candidate",
+        right_on="productid",
+        how="left",
+    )
+
+    # Anchor category -> same_category
+    ranker_lf = ranker_lf.join(
+        products_lf.select(
+            pl.col("productid").alias("anchor_pid"),
+            pl.col("category").alias("anchor_category"),
+        ),
+        left_on="anchor",
+        right_on="anchor_pid",
+        how="left",
+    ).with_columns(
+        (pl.col("category") == pl.col("anchor_category")).cast(pl.Int8).alias("same_category")
+    )
+
+    # Popularity joins
+    ranker_lf = (
+        ranker_lf
+        .join(pop_global_lf, left_on="candidate", right_on="productid", how="left")
+        .join(pop_store_lf, left_on=["userid", "candidate"], right_on=["userid", "productid"], how="left")
+        .join(pop_origin_lf, left_on=["origin", "candidate"], right_on=["origin", "productid"], how="left")
+        .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
+        .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
+        .with_columns(
+            pl.col("pop_global").fill_null(0).log1p(),
+            pl.col("pop_store").fill_null(0).log1p(),
+            pl.col("pop_origin").fill_null(0).log1p(),
+            pl.col("pop_region").fill_null(0).log1p(),
+            pl.col("pop_subch").fill_null(0).log1p(),
+        )
+    )
+
+    ranker_lf = ranker_lf.with_columns(
+        pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8).alias("channel"),
+        pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8).alias("commune"),
+        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8).alias("origin"),
+        pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8).alias("region"),
+        pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8).alias("subchannel"),
+        pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
+    )
+
+    ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
+
+    # Groups
+    groups = (
+        ranker_lf
+        .group_by(["orderid", "anchor"], maintain_order=True)
+        .agg(pl.len().alias("group_size"))
+        .select("group_size")
+        .collect()
+        .to_numpy()
+        .astype(np.int32)
+        .ravel()
+    )
+
+    groups_path = _artifact_path(artifacts_dir, "groups", "npy")
+    np.save(groups_path, groups)
+
+    train_path = _artifact_path(artifacts_dir, "train", "parquet")
+    ranker_lf.sink_parquet(train_path)
 
     return train_path, groups_path
 
