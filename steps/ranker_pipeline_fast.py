@@ -116,36 +116,41 @@ def generate_candidates_fast_to_parquet(
 ) -> str:
     baskets_df = pl.read_parquet(baskets_path)
 
-    rows = []
     wv = w2v_model.wv
+    try:
+        wv.fill_norms()
+    except Exception:
+        pass
 
-    for row in tqdm(
-        baskets_df.iter_rows(named=True),
-        total=len(baskets_df),
-        desc="Generating candidates + sim (fast)",
-    ):
-        orderid = row["orderid"]
-        basket = row["basket"]
+    # 1) Neighbor-Tabelle einmal bauen (387 * topk Zeilen)
+    anchors = list(wv.key_to_index.keys())
+    neigh_rows = []
+    for a in anchors:
+        for c, s in wv.most_similar(a, topn=topk):
+            if c != a:
+                neigh_rows.append((a, c, float(s)))
 
-        for anchor in basket:
-            if anchor not in wv:
-                continue
+    neigh_df = pl.DataFrame(
+        neigh_rows,
+        schema={
+            "anchor": pl.String,
+            "candidate": pl.String,
+            "sim_item2vec": pl.Float32,
+    },
+        orient="row")
 
-            retrieved = wv.most_similar(anchor, topn=topk)
-            for cand, sim in retrieved:
-                if cand == anchor:
-                    continue
-                rows.append(
-                    {
-                        "orderid": orderid,
-                        "anchor": anchor,
-                        "candidate": cand,
-                        "sim_item2vec": float(sim),
-                    }
-                )
-
+    # 2) Baskets exploden -> anchor pro Zeile -> join
     out_path = _artifact_path(artifacts_dir, "candidates", "parquet")
-    pl.DataFrame(rows).write_parquet(out_path)
+
+    (
+        baskets_df
+        .select(["orderid", "basket"])
+        .explode("basket")
+        .rename({"basket": "anchor"})
+        .join(neigh_df, on="anchor", how="inner")
+        .write_parquet(out_path)
+    )
+
     return out_path
 
 

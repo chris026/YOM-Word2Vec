@@ -66,7 +66,9 @@ def _shift_month(month_start: date, months: int) -> date:
     return date(year, month, 1)
 
 @step
-def data_split_monthly(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+def data_split_monthly(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    baskets = pl.read_parquet(baskets_path)
+
     if "orderdt" not in baskets.columns:
         raise ValueError("data_split_monthly requires an 'orderdt' column.")
 

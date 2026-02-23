@@ -6,13 +6,13 @@ from steps.ranker_pipeline_fast import ranker_training_pipeline_fast
 from steps.test_model import test_model
 import polars as pl
 
-@pipeline(enable_cache=False)
+@pipeline(enable_cache=True)
 def run_pipeline():
     data_path = load_data_clean()
     commerces_path = load_commerces()
     products_path = load_products()
-    baskets_path = word2vec_model.build_baskets(data_path)
-    train_df, test_df = word2vec_model.data_split(baskets_path)
+    baskets_path = word2vec_model.build_baskets_monthly(data_path)
+    train_df, test_df = word2vec_model.data_split_monthly(baskets_path)
     train_df_path, test_df_path = save_train_test_split(train_df, test_df)
     W2Vmodel_path = word2vec_model.train_model(train_df)
     lightGBM_model.prepare_data(W2Vmodel_path, data_path, commerces_path, products_path)
