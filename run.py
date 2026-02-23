@@ -20,11 +20,11 @@ def run_pipeline():
     #steps.model.test_model(model)
 
 
-    _, test_df_all_colums = word2vec_model.data_split(data_path)
-    test_df_all_colums_path = save_df(test_df_all_colums, "data/test_df_all_colums.parquet")
+    train_df_all_colums, _ = word2vec_model.data_split(data_path)
+    train_df_all_colums_path = save_df(train_df_all_colums, "data/test_df_all_colums.parquet")
 
     LGM_model_path = ranker_training_pipeline_fast(
-        orders_path=test_df_all_colums_path,
+        orders_path=train_df_all_colums_path,
         commerces_path=commerces_path,
         products_path=products_path,
         w2v_path=W2Vmodel_path,

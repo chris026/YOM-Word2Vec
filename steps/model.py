@@ -17,7 +17,7 @@ def build_baskets(df_path: str) -> str:
         .select(["orderid", "productid"])
         .group_by("orderid")
         .agg(pl.col("productid"))
-        # optional: nur Baskets mit >=2 Items
+        # nur Baskets mit >=2 Items
         .filter(pl.col("productid").list.len() >= 2)
         .collect()
     )
@@ -28,7 +28,7 @@ def build_baskets(df_path: str) -> str:
     return baskets_path
 
 @step
-def build_baskets_monthly(df_path: str) -> pl.DataFrame:
+def build_baskets_monthly(df_path: str) -> str:
     df = pl.scan_parquet(df_path)
 
     baskets = (
@@ -42,12 +42,14 @@ def build_baskets_monthly(df_path: str) -> pl.DataFrame:
                 pl.col("orderdt").first(),
             ]
         )
-        #nur Baskets mit >=2 Items
+        # nur Baskets mit >=2 Items
         .filter(pl.col("productid").list.len() >= 2)
         .collect()
     )
 
-    return baskets
+    baskets_path = "data/baskets.parquet"
+    baskets.write_parquet(baskets_path)
+    return baskets_path
 
 @step
 def data_split(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
