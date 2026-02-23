@@ -1,5 +1,4 @@
 import os
-import uuid
 import polars as pl
 import numpy as np
 import lightgbm as lgb
@@ -127,28 +126,21 @@ def generate_candidates_fast_to_parquet(
     ):
         orderid = row["orderid"]
         basket = row["basket"]
-        basket_set = set(basket)
 
         for anchor in basket:
             if anchor not in wv:
                 continue
 
             retrieved = wv.most_similar(anchor, topn=topk)
-            sim_map = dict(retrieved)
-            retrieved_ids = sim_map.keys()
-
-            candidates = set(retrieved_ids) | (basket_set - {anchor})
-
-            for cand in candidates:
-                if cand not in wv:
+            for cand, sim in retrieved:
+                if cand == anchor:
                     continue
-                sim = float(sim_map.get(cand, 0.0))
                 rows.append(
                     {
                         "orderid": orderid,
                         "anchor": anchor,
                         "candidate": cand,
-                        "sim_item2vec": sim,
+                        "sim_item2vec": float(sim),
                     }
                 )
 
@@ -268,14 +260,14 @@ def build_training_dataset_to_files(
 
 
 # ==============================
-# STEP 5 — TRAIN RANKER (no pandas)
+# STEP 5 — TRAIN RANKER
 # ==============================
 
-@step
+@step(enable_cache=False)
 def train_ranker_from_files(
     train_parquet_path: str,
     groups_npy_path: str,
-) -> lgb.LGBMRanker:
+) -> str:
 
     train_df = pl.read_parquet(train_parquet_path)
     groups = np.load(groups_npy_path)
@@ -329,14 +321,14 @@ def train_ranker_from_files(
 
     model_path = "models/lgbm_ranker.txt"
     model.booster_.save_model(model_path)
-    return model
+    return model_path
 
 
 # ==============================
 # PIPELINE
 # ==============================
 
-@pipeline
+@pipeline(enable_cache=False)
 def ranker_training_pipeline_fast(
     orders_path: str,
     commerces_path: str,
@@ -344,7 +336,7 @@ def ranker_training_pipeline_fast(
     w2v_path: str,
     artifacts_dir: str = "artifacts",
     topk: int = 20,
-):
+) -> str:
     w2v_model = load_w2v(w2v_path)
 
     (
@@ -381,4 +373,4 @@ def ranker_training_pipeline_fast(
         artifacts_dir=artifacts_dir,
     )
 
-    train_ranker_from_files(train_path, groups_path)
+    return train_ranker_from_files(train_path, groups_path)

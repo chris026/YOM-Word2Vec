@@ -3,6 +3,7 @@ import polars as pl
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import date
 from sklearn.manifold import TSNE
 from gensim.models import Word2Vec
 
@@ -15,13 +16,35 @@ def build_baskets(df_path: str) -> pl.DataFrame:
         .drop_nulls(["orderid","productid"])
         .select(["orderid", "productid"])
         .group_by("orderid")
-        .agg(pl.col("productid").alias("basket"))
+        .agg(pl.col("productid"))
         # optional: nur Baskets mit >=2 Items
-        .filter(pl.col("basket").list.len() >= 2)
+        .filter(pl.col("productid").list.len() >= 2)
         .collect()
     )
 
     #print(baskets.head())
+    return baskets
+
+@step
+def build_baskets_monthly(df_path: str) -> pl.DataFrame:
+    df = pl.scan_parquet(df_path)
+
+    baskets = (
+        df
+        .drop_nulls(["orderid", "productid", "orderdt"])
+        .select(["orderid", "productid", "orderdt"])
+        .group_by("orderid")
+        .agg(
+            [
+                pl.col("productid"),
+                pl.col("orderdt").first().alias("orderdt"),
+            ]
+        )
+        # optional: nur Baskets mit >=2 Items
+        .filter(pl.col("productid").list.len() >= 2)
+        .collect()
+    )
+
     return baskets
 
 @step
@@ -31,12 +54,66 @@ def data_split(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
     test_df = baskets[split_idx:]
     return train_df, test_df
 
+def _shift_month(month_start: date, months: int) -> date:
+    month_index = month_start.month - 1 + months
+    year = month_start.year + (month_index // 12)
+    month = (month_index % 12) + 1
+    return date(year, month, 1)
+
+@step
+def data_split_monthly(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+    if "orderdt" not in baskets.columns:
+        raise ValueError("data_split_monthly requires an 'orderdt' column.")
+
+    orderdt_dtype = baskets.schema["orderdt"]
+    orderdt_col = pl.col("orderdt")
+
+    if orderdt_dtype == pl.Date:
+        month_expr = orderdt_col.dt.truncate("1mo")
+    elif orderdt_dtype == pl.Datetime:
+        month_expr = orderdt_col.dt.date().dt.truncate("1mo")
+    else:
+        parsed_date_expr = pl.coalesce(
+            [
+                orderdt_col.str.strptime(pl.Datetime, strict=False).dt.date(),
+                orderdt_col.str.strptime(pl.Date, strict=False),
+            ]
+        )
+        month_expr = parsed_date_expr.dt.truncate("1mo")
+
+    with_month = baskets.with_columns(month_expr.alias("_order_month"))
+
+    month_values = (
+        with_month
+        .select(pl.col("_order_month").drop_nulls().unique().sort())
+        .to_series()
+    )
+
+    if len(month_values) == 0:
+        raise ValueError("data_split_monthly found no parseable order dates in 'orderdt'.")
+
+    latest_month = month_values[-1]
+    test_from_month = _shift_month(latest_month, -1)
+
+    train_df = (
+        with_month
+        .filter(pl.col("_order_month").is_null() | (pl.col("_order_month") < test_from_month))
+        .drop(["_order_month", "orderdt"])
+    )
+    test_df = (
+        with_month
+        .filter(pl.col("_order_month").is_not_null() & (pl.col("_order_month") >= test_from_month))
+        .drop(["_order_month", "orderdt"])
+    )
+
+    return train_df, test_df
+
 @step(enable_cache=True)
 def train_model(train_df: pl.DataFrame) -> str:
     sentences = PolarsBasketIterator(train_df)
     model = Word2Vec(
         sentences=sentences,
-        vector_size=25,
+        vector_size=226,
         window=100,
         sg=1,
         shrink_windows=False,
@@ -54,7 +131,7 @@ class PolarsBasketIterator:
 
     def __iter__(self):
         for row in self.df.iter_rows(named=True):
-            yield row["basket"]
+            yield row["productid"]
 
 @step
 def plot_all_items_2d(model_path, max_labels=60, random_state=43):

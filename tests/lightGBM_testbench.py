@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import time
 from typing import Iterable
@@ -223,8 +224,9 @@ def counterfactual_sensitivity_test(ranker: lgb.Booster, seed: int, num_rows: in
             }
         )
 
-    sim_lo_rows = [dict(r, sim_item2vec=0.1) for r in base_rows]
-    sim_hi_rows = [dict(r, sim_item2vec=0.9) for r in base_rows]
+    # Use full feature range; many trained models split sim_item2vec near 1.0.
+    sim_lo_rows = [dict(r, sim_item2vec=0.0) for r in base_rows]
+    sim_hi_rows = [dict(r, sim_item2vec=1.0) for r in base_rows]
     cat_lo_rows = [dict(r, same_category=0) for r in base_rows]
     cat_hi_rows = [dict(r, same_category=1) for r in base_rows]
     pop_lo_rows = [
@@ -246,10 +248,45 @@ def counterfactual_sensitivity_test(ranker: lgb.Booster, seed: int, num_rows: in
     return {
         "sim_high_gt_low_rate": float(np.mean(s_sim_hi > s_sim_lo)),
         "sim_avg_delta": float(np.mean(s_sim_hi - s_sim_lo)),
+        "sim_high_lt_low_rate": float(np.mean(s_sim_hi < s_sim_lo)),
         "samecat_1_gt_0_rate": float(np.mean(s_cat_hi > s_cat_lo)),
         "samecat_avg_delta": float(np.mean(s_cat_hi - s_cat_lo)),
         "pop_high_gt_low_rate": float(np.mean(s_pop_hi > s_pop_lo)),
         "pop_avg_delta": float(np.mean(s_pop_hi - s_pop_lo)),
+    }
+
+
+def training_data_diagnostics(train_parquet_path: str) -> dict | None:
+    if not train_parquet_path or not os.path.exists(train_parquet_path):
+        return None
+
+    df = read_table(train_parquet_path)
+    needed = {"label", "sim_item2vec"}
+    if not needed.issubset(df.columns):
+        return None
+
+    pos = df[df["label"] == 1]
+    neg = df[df["label"] == 0]
+
+    pos_count = int(len(pos))
+    neg_count = int(len(neg))
+
+    sim_pos = pd.to_numeric(pos["sim_item2vec"], errors="coerce").fillna(0.0) if pos_count else pd.Series(dtype=float)
+    sim_neg = pd.to_numeric(neg["sim_item2vec"], errors="coerce").fillna(0.0) if neg_count else pd.Series(dtype=float)
+
+    sim_mean_pos = float(sim_pos.mean()) if pos_count else 0.0
+    sim_mean_neg = float(sim_neg.mean()) if neg_count else 0.0
+
+    return {
+        "rows": int(len(df)),
+        "label_rate": float(pd.to_numeric(df["label"], errors="coerce").fillna(0.0).mean()),
+        "pos_rows": pos_count,
+        "neg_rows": neg_count,
+        "sim_mean_pos": sim_mean_pos,
+        "sim_mean_neg": sim_mean_neg,
+        "sim_mean_gap_pos_minus_neg": sim_mean_pos - sim_mean_neg,
+        "pos_sim_zero_rate": float((sim_pos == 0.0).mean()) if pos_count else 0.0,
+        "neg_sim_zero_rate": float((sim_neg == 0.0).mean()) if neg_count else 0.0,
     }
 
 
@@ -456,6 +493,7 @@ def quick_warnings(
     sanity: dict,
     sensitivity: dict,
     offline: dict,
+    train_diag: dict | None = None,
 ) -> Iterable[str]:
     warnings = []
 
@@ -469,10 +507,20 @@ def quick_warnings(
         warnings.append("Prediction variance near zero: model may be degenerate.")
 
     if sensitivity.get("sim_high_gt_low_rate", 0.0) < 0.55:
-        warnings.append("Low sensitivity to sim_item2vec in counterfactual test.")
+        warnings.append("Low positive sensitivity to sim_item2vec in counterfactual test.")
+
+    if sensitivity.get("sim_high_lt_low_rate", 0.0) > 0.75:
+        warnings.append("sim_item2vec appears directionally inverted: higher similarity lowers score.")
 
     if offline.get("used_anchors", 0) == 0:
         warnings.append("No usable anchors in offline eval; check IDs and vocab alignment.")
+
+    if train_diag is not None:
+        if train_diag.get("sim_mean_gap_pos_minus_neg", 0.0) < -0.05:
+            warnings.append("Training data shows sim_item2vec anti-correlation with label (possible train-serving skew).")
+
+        if train_diag.get("pos_sim_zero_rate", 0.0) > 0.5 and train_diag.get("neg_sim_zero_rate", 1.0) < 0.05:
+            warnings.append("Most positives have sim_item2vec=0 while negatives do not (candidate generation mismatch).")
 
     return warnings
 
@@ -498,6 +546,11 @@ def main() -> None:
     parser.add_argument("--sanity-rows", type=int, default=5000, help="Rows for random sanity prediction test")
     parser.add_argument("--cf-rows", type=int, default=2000, help="Rows for counterfactual test")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--train-parquet-path",
+        default="artifacts/train.parquet",
+        help="Optional training parquet for train-serving skew diagnostics",
+    )
     args = parser.parse_args()
 
     t0 = time.time()
@@ -557,7 +610,11 @@ def main() -> None:
     )
     print_summary("Offline Ranking Quality", offline)
 
-    warnings = list(quick_warnings(integrity, sanity, sensitivity, offline))
+    train_diag = training_data_diagnostics(args.train_parquet_path)
+    if train_diag is not None:
+        print_summary("Training Data Diagnostics", train_diag)
+
+    warnings = list(quick_warnings(integrity, sanity, sensitivity, offline, train_diag))
     print("\n=== Quick Warnings ===")
     if warnings:
         for w in warnings:
@@ -568,4 +625,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    #python lightGBM_testbench.py --eval-max-orders 100 --sanity-rows 200 --cf-rows 200 --eval-k 5 --topk-retrieval 20
+    #python tests/lightGBM_testbench.py --eval-max-orders 100 --sanity-rows 200 --cf-rows 200 --eval-k 5 --topk-retrieval 20

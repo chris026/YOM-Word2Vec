@@ -3,7 +3,7 @@ from typing import List, Tuple
 
 import polars as pl
 
-from steps.serve_bundle import (
+from serve_bundle import (
     build_lookup_dicts,
     load_models,
     recommend_candidates,

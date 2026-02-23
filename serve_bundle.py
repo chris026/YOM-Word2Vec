@@ -174,7 +174,6 @@ def recommend_candidates(
         psub = pop_subch.get((subch, cand), 0)
         po = pop_origin.get((origin, cand), 0)
 
-        # optional transforms (recommended)
         pg = np.log1p(pg)
         ps = np.log1p(ps)
         pr = np.log1p(pr)
@@ -219,15 +218,12 @@ def recommend_candidates(
     return ranked[:topn]
 
 
-# -----------------------
 # Example usage
-# -----------------------
-
 if __name__ == "__main__":
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
-    anchor_pid = "002302-002"
-    userid = "c32bf393ff6a79c15fa3677e621367c6"
+    anchor_pid = "000050-002"
+    userid = "0882f6f2bdce70370cd19337f9fdfd70"
     origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
@@ -262,7 +258,7 @@ if __name__ == "__main__":
         pop_origin=pop_origin,
         topk_retrieval=50,
         topn=10,
-        basket=set(),  # falls du gerade einen Warenkorb hast, hier rein
+        basket=set(),  # falls gerade einen Warenkorb besteht, hier rein
     )
 
     anchor_pid = _to_key(anchor_pid)
