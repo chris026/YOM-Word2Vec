@@ -8,7 +8,7 @@ from sklearn.manifold import TSNE
 from gensim.models import Word2Vec
 
 @step
-def build_baskets(df_path: str) -> pl.DataFrame:
+def build_baskets(df_path: str) -> str:
     df = pl.scan_parquet(df_path)
 
     baskets = (
@@ -23,7 +23,9 @@ def build_baskets(df_path: str) -> pl.DataFrame:
     )
 
     #print(baskets.head())
-    return baskets
+    baskets_path = "data/baskets.parquet"
+    baskets.write_parquet(baskets_path)
+    return baskets_path
 
 @step
 def build_baskets_monthly(df_path: str) -> pl.DataFrame:
@@ -37,10 +39,10 @@ def build_baskets_monthly(df_path: str) -> pl.DataFrame:
         .agg(
             [
                 pl.col("productid"),
-                pl.col("orderdt").first().alias("orderdt"),
+                pl.col("orderdt").first(),
             ]
         )
-        # optional: nur Baskets mit >=2 Items
+        #nur Baskets mit >=2 Items
         .filter(pl.col("productid").list.len() >= 2)
         .collect()
     )
@@ -48,7 +50,8 @@ def build_baskets_monthly(df_path: str) -> pl.DataFrame:
     return baskets
 
 @step
-def data_split(baskets: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+def data_split(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    baskets = pl.read_parquet(baskets_path)
     split_idx = int(len(baskets) * 0.8)
     train_df = baskets[:split_idx]
     test_df = baskets[split_idx:]

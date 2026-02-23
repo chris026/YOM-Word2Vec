@@ -71,3 +71,8 @@ def save_train_test_split(
     train_df.write_parquet(train_path)
     test_df.write_parquet(test_path)
     return train_path, test_path
+
+@step
+def save_df(df: pl.DataFrame, path: str) -> str:
+    df.write_parquet(path)
+    return path
