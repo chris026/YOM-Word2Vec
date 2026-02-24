@@ -21,7 +21,7 @@ def run_pipeline():
 
 
     train_df_all_colums, _ = word2vec_model.data_split(data_path)
-    train_df_all_colums_path = save_df(train_df_all_colums, "data/test_df_all_colums.parquet")
+    train_df_all_colums_path = save_df(train_df_all_colums, "data/train_df_all_colums.parquet")
 
     LGM_model_path = ranker_training_pipeline_fast(
         orders_path=train_df_all_colums_path,
