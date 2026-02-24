@@ -278,6 +278,7 @@ def build_training_dataset_to_files(
     pop_origin_path: str,
     pop_region_path: str,
     pop_subch_path: str,
+    topk: int,
     artifacts_dir: str = "artifacts",
 ) -> tuple[str, str]:
 
@@ -285,12 +286,6 @@ def build_training_dataset_to_files(
     baskets_lf    = pl.scan_parquet(baskets_path)
     commerces_lf  = pl.scan_parquet(commerces_path)
     products_lf   = pl.scan_parquet(products_path)
-
-    pop_global_lf = pl.scan_parquet(pop_global_path)
-    pop_store_lf  = pl.scan_parquet(pop_store_path)
-    pop_origin_lf = pl.scan_parquet(pop_origin_path)
-    pop_region_lf = pl.scan_parquet(pop_region_path)
-    pop_subch_lf  = pl.scan_parquet(pop_subch_path)
 
     # --- baskets: wie vorher "basket" als List-Spalte im Endresult behalten
     basket_only_lf = baskets_lf.select(["orderid", "basket"])
@@ -338,6 +333,12 @@ def build_training_dataset_to_files(
     )
 
     # Popularity joins
+    pop_global_lf = pl.scan_parquet(pop_global_path)
+    pop_store_lf  = pl.scan_parquet(pop_store_path)
+    pop_origin_lf = pl.scan_parquet(pop_origin_path)
+    pop_region_lf = pl.scan_parquet(pop_region_path)
+    pop_subch_lf  = pl.scan_parquet(pop_subch_path)
+    
     ranker_lf = (
         ranker_lf
         .join(pop_global_lf, left_on="candidate", right_on="productid", how="left")
@@ -364,24 +365,24 @@ def build_training_dataset_to_files(
     )
 
     ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
-
-    # Groups
-    groups = (
-        ranker_lf
-        .group_by(["orderid", "anchor"], maintain_order=True)
-        .agg(pl.len().alias("group_size"))
-        .select("group_size")
-        .collect()
-        .to_numpy()
-        .astype(np.int32)
-        .ravel()
-    )
-
-    groups_path = _artifact_path(artifacts_dir, "groups", "npy")
-    np.save(groups_path, groups)
-
     train_path = _artifact_path(artifacts_dir, "train", "parquet")
     ranker_lf.sink_parquet(train_path)
+
+    n_orderid = int(
+        candidates_lf
+        .select(pl.col("orderid").count())
+        .collect()
+        .item()
+    )
+
+    # Achtung: n_orderid muss hier die ANZAHL ZEILEN in candidates sein (nicht unique orderids)
+    if n_orderid % topk != 0:
+        raise ValueError(f"n_orderid={n_orderid} ist nicht durch topk={topk} teilbar")
+
+    n_groups = n_orderid // topk
+    groups = np.full(n_groups, topk, dtype=np.int32)
+    groups_path = _artifact_path(artifacts_dir, "groups", "npy")
+    np.save(groups_path, groups)
 
     return train_path, groups_path
 
@@ -497,6 +498,7 @@ def ranker_training_pipeline_fast(
         pop_origin_path=pop_origin_path,
         pop_region_path=pop_region_path,
         pop_subch_path=pop_subch_path,
+        topk=topk,
         artifacts_dir=artifacts_dir,
     )
 
