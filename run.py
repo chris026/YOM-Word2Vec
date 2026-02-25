@@ -1,10 +1,8 @@
 from zenml import pipeline
 from steps.load_data import load_data_clean, load_products, load_commerces, save_train_test_split, save_df
-import steps.model as word2vec_model
-import steps.lightGBM_model as lightGBM_model
-from steps.ranker_pipeline_fast import ranker_training_pipeline_fast
+import steps.train_Word2Vec as word2vec_model
+from steps.train_lightGBM import ranker_training_pipeline_fast
 from steps.test_model import test_model
-import polars as pl
 
 @pipeline(enable_cache=True)
 def run_pipeline():
@@ -15,7 +13,6 @@ def run_pipeline():
     train_df, test_df = word2vec_model.data_split_monthly(baskets_path)
     train_df_path, test_df_path = save_train_test_split(train_df, test_df)
     W2Vmodel_path = word2vec_model.train_model(train_df)
-    lightGBM_model.prepare_data(W2Vmodel_path, data_path, commerces_path, products_path)
     #steps.model.plot_all_items_2d(model_path)
     #steps.model.test_model(model)
 
