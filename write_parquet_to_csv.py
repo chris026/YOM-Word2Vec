@@ -3,7 +3,7 @@ from pathlib import Path
 import polars as pl
 
 PARQUET_PATH = "artifacts/train.parquet"
-CSV_PATH = "data/parquet_to.csv"
+CSV_PATH = "artifacts/parquet_to.csv"
 
 
 def prepare_for_csv(df: pl.DataFrame) -> pl.DataFrame:

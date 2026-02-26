@@ -303,6 +303,8 @@ def build_training_dataset_to_files(
 
     # --- baskets: wie vorher "basket" als List-Spalte im Endresult behalten
     baskets_meta_lf = baskets_lf.select(["orderid", "userid", "origin"])
+    commerces_lf = commerces_lf.drop("sellerid", "active")
+    products_lf = products_lf.select(["category", "productid"])
 
     # --- positives: (orderid, candidate) aus dem basket, zum Labeln per Join
     positives_lf = (
