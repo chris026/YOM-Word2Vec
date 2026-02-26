@@ -207,7 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Training data
-data
+data/*.csv
+data/*.parquet
 models
 artifacts
 tests/*.md
