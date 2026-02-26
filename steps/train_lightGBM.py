@@ -287,8 +287,21 @@ def build_training_dataset_to_files(
     commerces_lf  = pl.scan_parquet(commerces_path)
     products_lf   = pl.scan_parquet(products_path)
 
+    """
+    baskets_lf
+    Schema({'orderid': String, 'basket': List(String), 'userid': String, 'origin': String})
+
+    candidates
+    Schema({'orderid': String, 'anchor': String, 'candidate': String, 'sim_item2vec': Float32})
+
+    commerces_lf
+    Schema({'userid': String, 'sellerid': String, 'active': Boolean, 'commune': String, 'channel': String, 'subchannel': String, 'region': String})
+
+    products_lf
+    Schema({'productid': String, 'name': String, 'category': String, 'subcategory': String, 'blocked': Boolean, 'packageunit': String, 'amountperpackage': Float64, 'boxunit': String, 'amountperbox': Int64, 'salesunit': String, 'description': String, 'categoricallevel1': String})
+    """
+
     # --- baskets: wie vorher "basket" als List-Spalte im Endresult behalten
-    basket_only_lf = baskets_lf.select(["orderid", "basket"])
     baskets_meta_lf = baskets_lf.select(["orderid", "userid", "origin"])
 
     # --- positives: (orderid, candidate) aus dem basket, zum Labeln per Join
@@ -304,7 +317,6 @@ def build_training_dataset_to_files(
     # Base joins: candidates + basket + store meta
     ranker_lf = (
         candidates_lf
-        .join(basket_only_lf, on="orderid", how="left")
         .join(positives_lf, on=["orderid", "candidate"], how="left")
         .with_columns(pl.col("label").fill_null(0).cast(pl.Int8))
         .join(baskets_meta_lf, on="orderid", how="left")
@@ -319,6 +331,7 @@ def build_training_dataset_to_files(
         how="left",
     )
 
+    """
     # Anchor category -> same_category
     ranker_lf = ranker_lf.join(
         products_lf.select(
@@ -331,6 +344,7 @@ def build_training_dataset_to_files(
     ).with_columns(
         (pl.col("category") == pl.col("anchor_category")).cast(pl.Int8).alias("same_category")
     )
+    """
 
     # Popularity joins
     pop_global_lf = pl.scan_parquet(pop_global_path)
@@ -356,15 +370,15 @@ def build_training_dataset_to_files(
     )
 
     ranker_lf = ranker_lf.with_columns(
-        pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8).alias("channel"),
-        pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8).alias("commune"),
-        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8).alias("origin"),
-        pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8).alias("region"),
-        pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8).alias("subchannel"),
+        pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8),
+        pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8),
+        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8),
+        pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8),
+        pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
     )
 
-    ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
+    ranker_lf = ranker_lf.sort(["orderid", "anchor"])
     train_path = _artifact_path(artifacts_dir, "train", "parquet")
     ranker_lf.sink_parquet(train_path)
 
@@ -406,7 +420,7 @@ def train_ranker_from_files(
         "pop_subch",
         "pop_origin",
         "pop_region",
-        "same_category",
+        #"same_category",
         "channel",
         "pop_store",
         "commune",
@@ -442,7 +456,8 @@ def train_ranker_from_files(
         subsample=0.8,
         colsample_bytree=0.8,
         reg_lambda=1.0,
-        random_state=42
+        random_state=42,
+        force_row_wise=True
     )
 
     model.fit(X, y, group=groups, categorical_feature=categorical_cols)
