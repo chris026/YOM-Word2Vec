@@ -1,7 +1,18 @@
-﻿import argparse
+import argparse
 from pathlib import Path
 
 import polars as pl
+
+
+def _get_row_count(path: Path, lazy_df: pl.LazyFrame) -> int:
+    """Liest die Zeilenanzahl effizient aus Parquet-Metadaten; faellt sonst auf Count zurueck."""
+    try:
+        import pyarrow.parquet as pq
+
+        return pq.ParquetFile(path).metadata.num_rows
+    except Exception:
+        # Fallback, falls pyarrow nicht verfuegbar ist oder Metadatenzugriff fehlschlaegt.
+        return int(lazy_df.select(pl.len()).collect(engine="streaming").item())
 
 
 def inspect_parquet(file_path: str, n: int = 5) -> None:
@@ -13,6 +24,8 @@ def inspect_parquet(file_path: str, n: int = 5) -> None:
     lazy_df = pl.scan_parquet(str(path))
 
     print(f"Datei: {path}")
+    print(f"Zeilen: {_get_row_count(path, lazy_df)}")
+
     print("\nSchema:")
     schema = lazy_df.collect_schema()
     for name, dtype in schema.items():
@@ -30,7 +43,7 @@ def main() -> None:
     parser.add_argument(
         "--file",
         help="Pfad zur .parquet-Datei",
-        default="data/baskets.parquet")
+        default="artifacts/train.parquet")
     parser.add_argument(
         "--rows",
         type=int,

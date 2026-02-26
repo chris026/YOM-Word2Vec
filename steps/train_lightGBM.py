@@ -380,9 +380,46 @@ def build_training_dataset_to_files(
         pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
     )
 
+    ranker_lf = ranker_lf.select([
+        "sim_item2vec",
+        "pop_global",
+        "pop_subch",
+        "pop_origin",
+        "pop_region",
+        #"same_category",
+        "channel",
+        "pop_store",
+        "commune",
+        "cand_category",
+        "origin",
+        "region",
+        "subchannel",
+        "label",
+        "orderid",
+        "anchor"]
+    )
+    
     ranker_lf = ranker_lf.sort(["orderid", "anchor"])
+
+    ranker_lf = ranker_lf.select([
+        "sim_item2vec",
+        "pop_global",
+        "pop_subch",
+        "pop_origin",
+        "pop_region",
+        #"same_category",
+        "channel",
+        "pop_store",
+        "commune",
+        "cand_category",
+        "origin",
+        "region",
+        "subchannel",
+        "label"]
+    )
+
     train_path = _artifact_path(artifacts_dir, "train", "parquet")
-    ranker_lf.sink_parquet(train_path)
+    ranker_lf.sink_parquet(train_path, compression="lz4")
 
     n_orderid = int(
         candidates_lf
@@ -480,7 +517,7 @@ def ranker_training_pipeline_fast(
     products_path: str,
     w2v_path: str,
     artifacts_dir: str = "artifacts",
-    topk: int = 20,
+    topk: int = 10,
 ) -> str:
     w2v_model = load_w2v(w2v_path)
 

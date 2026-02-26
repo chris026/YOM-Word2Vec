@@ -26,7 +26,7 @@ def run_pipeline():
         products_path=products_path,
         w2v_path=W2Vmodel_path,
         artifacts_dir="artifacts",
-        topk=20,
+        topk=10,
     )
 
     #metrics = test_model(test_df_path, W2Vmodel_path, LGM_model_path)
