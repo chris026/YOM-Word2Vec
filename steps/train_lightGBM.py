@@ -361,11 +361,11 @@ def build_training_dataset_to_files(
         .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
         .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
         .with_columns(
-            pl.col("pop_global").fill_null(0).log1p(),
-            pl.col("pop_store").fill_null(0).log1p(),
-            pl.col("pop_origin").fill_null(0).log1p(),
-            pl.col("pop_region").fill_null(0).log1p(),
-            pl.col("pop_subch").fill_null(0).log1p(),
+            pl.col("pop_global").fill_null(0),
+            pl.col("pop_store").fill_null(0),
+            pl.col("pop_origin").fill_null(0),
+            pl.col("pop_region").fill_null(0),
+            pl.col("pop_subch").fill_null(0),
         )
     )
 
