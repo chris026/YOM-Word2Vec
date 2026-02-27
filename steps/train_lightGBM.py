@@ -20,16 +20,7 @@ def _artifact_path(base_dir: str, name: str, ext: str) -> str:
 
 
 # ==============================
-# STEP 1 — LOAD WORD2VEC
-# ==============================
-
-@step
-def load_w2v(model_path: str) -> Word2Vec:
-    return Word2Vec.load(model_path)
-
-
-# ==============================
-# STEP 2 — PREPARE DATA (baskets + popularity tables) -> PARQUET PATHS
+# STEP 1 — PREPARE DATA (baskets + popularity tables) -> PARQUET PATHS
 # ==============================
 
 @step
@@ -104,29 +95,30 @@ def prepare_data(
 
 
 # ==============================
-# STEP 3 — FAST CANDIDATES + SIMILARITY -> PARQUET
+# STEP 2 — FAST CANDIDATES + SIMILARITY -> PARQUET
 # ==============================
 
-@step
+@step(enable_cache=False)
 def generate_candidates_fast_to_parquet(
     baskets_path: str,
-    w2v_model: Word2Vec,
+    w2v_model_path: str,
     topk: int,
     artifacts_dir: str = "artifacts",
 ) -> str:
     baskets_df = pl.read_parquet(baskets_path)
 
+    w2v_model = Word2Vec.load(w2v_model_path)
     wv = w2v_model.wv
     try:
         wv.fill_norms()
     except Exception:
-        pass
+        print("wv.fill_norms has not worked -> pass")
 
     # 1) Neighbor-Tabelle einmal bauen (387 * topk Zeilen)
     anchors = list(wv.key_to_index.keys())
     neigh_rows = []
     for a in anchors:
-        for c, s in wv.most_similar(a, topn=topk):
+        for c, s in wv.most_similar(a, topn=len(wv.key_to_index.keys())):
             if c != a:
                 neigh_rows.append((a, c, float(s)))
 
@@ -142,6 +134,13 @@ def generate_candidates_fast_to_parquet(
     # 2) Baskets exploden -> anchor pro Zeile -> join
     out_path = _artifact_path(artifacts_dir, "candidates", "parquet")
 
+    """
+    baskets_df.schema
+    Schema({'orderid': String, 'basket': List(String), 'userid': String, 'origin': String})
+    neigh_df.schema
+    Schema({'anchor': String, 'candidate': String, 'sim_item2vec': Float32})
+    """
+
     (
         baskets_df
         .select(["orderid", "basket"])
@@ -155,116 +154,7 @@ def generate_candidates_fast_to_parquet(
 
 
 # ==============================
-# STEP 4 — BUILD TRAINING DATASET (joins + pops) -> PARQUET + GROUPS NPY
-# ==============================
-
-@step
-def build_training_dataset_to_files_OLD(
-    candidates_path: str,
-    baskets_path: str,
-    commerces_path: str,
-    products_path: str,
-    pop_global_path: str,
-    pop_store_path: str,
-    pop_origin_path: str,
-    pop_region_path: str,
-    pop_subch_path: str,
-    artifacts_dir: str = "artifacts",
-) -> tuple[str, str]:
-
-    candidates_lf = pl.scan_parquet(candidates_path)
-    baskets_lf = pl.scan_parquet(baskets_path)
-    commerces_lf = pl.scan_parquet(commerces_path)
-    products_lf = pl.scan_parquet(products_path)
-
-    pop_global_lf = pl.scan_parquet(pop_global_path)
-    pop_store_lf = pl.scan_parquet(pop_store_path)
-    pop_origin_lf = pl.scan_parquet(pop_origin_path)
-    pop_region_lf = pl.scan_parquet(pop_region_path)
-    pop_subch_lf = pl.scan_parquet(pop_subch_path)
-
-    # Base joins: candidates + basket + store meta
-    ranker_lf = (
-        candidates_lf
-        .join(baskets_lf.select(["orderid", "basket"]), on="orderid", how="left")
-        .with_columns(
-            pl.col("basket").list.contains(pl.col("candidate")).cast(pl.Int8).alias("label")
-        )
-        .join(baskets_lf.select(["orderid", "userid", "origin"]), on="orderid", how="left")
-        .join(commerces_lf, on="userid", how="left")
-    )
-
-    # Candidate product meta
-    ranker_lf = ranker_lf.join(
-        products_lf,
-        left_on="candidate",
-        right_on="productid",
-        how="left",
-    )
-
-    # Anchor category -> same_category
-    ranker_lf = ranker_lf.join(
-        products_lf.select(
-            pl.col("productid").alias("anchor_pid"),
-            pl.col("category").alias("anchor_category"),
-        ),
-        left_on="anchor",
-        right_on="anchor_pid",
-        how="left",
-    ).with_columns(
-        (pl.col("category") == pl.col("anchor_category")).cast(pl.Int8).alias("same_category")
-    )
-
-    # Popularity joins
-    ranker_lf = (
-        ranker_lf
-        .join(pop_global_lf, left_on="candidate", right_on="productid", how="left")
-        .join(pop_store_lf, left_on=["userid", "candidate"], right_on=["userid", "productid"], how="left")
-        .join(pop_origin_lf, left_on=["origin", "candidate"], right_on=["origin", "productid"], how="left")
-        .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
-        .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
-        .with_columns(
-            pl.col("pop_global").fill_null(0).log1p(),
-            pl.col("pop_store").fill_null(0).log1p(),
-            pl.col("pop_origin").fill_null(0).log1p(),
-            pl.col("pop_region").fill_null(0).log1p(),
-            pl.col("pop_subch").fill_null(0).log1p(),
-        )
-    )
-
-    ranker_lf = ranker_lf.with_columns(
-        pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8).alias("channel"),
-        pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8).alias("commune"),
-        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8).alias("origin"),
-        pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8).alias("region"),
-        pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8).alias("subchannel"),
-        pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
-    )
-
-    ranker_lf = ranker_lf.sort(["orderid", "anchor", "candidate"])
-
-    # Groups
-    groups = (
-        ranker_lf
-        .group_by(["orderid", "anchor"], maintain_order=True)
-        .agg(pl.len().alias("group_size"))
-        .select("group_size")
-        .collect()
-        .to_numpy()
-        .astype(np.int32)
-        .flatten()
-    )
-
-    groups_path = _artifact_path(artifacts_dir, "groups", "npy")
-    np.save(groups_path, groups)
-
-    train_path = _artifact_path(artifacts_dir, "train", "parquet")
-    ranker_lf.collect().write_parquet(train_path)
-
-    return train_path, groups_path
-
-# ==============================
-# STEP 4 — BUILD TRAINING DATASET (joins + pops) -> PARQUET + GROUPS NPY
+# STEP 3 — BUILD TRAINING DATASET (joins + pops) -> PARQUET + GROUPS NPY
 # ==============================
 
 @step(enable_cache=False)
@@ -321,9 +211,11 @@ def build_training_dataset_to_files(
         candidates_lf
         .join(positives_lf, on=["orderid", "candidate"], how="left")
         .with_columns(pl.col("label").fill_null(0).cast(pl.Int8))
-        .join(baskets_meta_lf, on="orderid", how="left")
-        .join(commerces_lf, on="userid", how="left")
     )
+
+    # Candidate product meta
+    ranker_lf = ranker_lf.join(baskets_meta_lf, on="orderid", how="left")
+    ranker_lf = ranker_lf.join(commerces_lf, on="userid", how="left")
 
     # Candidate product meta
     ranker_lf = ranker_lf.join(
@@ -332,21 +224,6 @@ def build_training_dataset_to_files(
         right_on="productid",
         how="left",
     )
-
-    """
-    # Anchor category -> same_category
-    ranker_lf = ranker_lf.join(
-        products_lf.select(
-            pl.col("productid").alias("anchor_pid"),
-            pl.col("category").alias("anchor_category"),
-        ),
-        left_on="anchor",
-        right_on="anchor_pid",
-        how="left",
-    ).with_columns(
-        (pl.col("category") == pl.col("anchor_category")).cast(pl.Int8).alias("same_category")
-    )
-    """
 
     # Popularity joins
     pop_global_lf = pl.scan_parquet(pop_global_path)
@@ -401,6 +278,21 @@ def build_training_dataset_to_files(
     
     ranker_lf = ranker_lf.sort(["orderid", "anchor"])
 
+    groups = (
+        ranker_lf
+        .select(["orderid", "anchor"])
+        .group_by(["orderid", "anchor"], maintain_order=True)
+        .agg(pl.len().alias("group_size"))
+        .select("group_size")
+        .collect()
+        .to_numpy()
+        .astype(np.int32)
+        .ravel()
+    )
+
+    groups_path = _artifact_path(artifacts_dir, "groups", "npy")
+    np.save(groups_path, groups)
+
     ranker_lf = ranker_lf.select([
         "sim_item2vec",
         "pop_global",
@@ -421,13 +313,14 @@ def build_training_dataset_to_files(
     train_path = _artifact_path(artifacts_dir, "train", "parquet")
     ranker_lf.sink_parquet(train_path, compression="lz4")
 
+    """
     n_orderid = int(
         candidates_lf
         .select(pl.col("orderid").count())
         .collect()
         .item()
     )
-
+    
     # Achtung: n_orderid muss hier die ANZAHL ZEILEN in candidates sein (nicht unique orderids)
     if n_orderid % topk != 0:
         raise ValueError(f"n_orderid={n_orderid} ist nicht durch topk={topk} teilbar")
@@ -436,12 +329,13 @@ def build_training_dataset_to_files(
     groups = np.full(n_groups, topk, dtype=np.int32)
     groups_path = _artifact_path(artifacts_dir, "groups", "npy")
     np.save(groups_path, groups)
+    """
 
     return train_path, groups_path
 
 
 # ==============================
-# STEP 5 — TRAIN RANKER
+# STEP 4 — TRAIN RANKER
 # ==============================
 
 @step(enable_cache=False)
@@ -519,8 +413,6 @@ def ranker_training_pipeline_fast(
     artifacts_dir: str = "artifacts",
     topk: int = 10,
 ) -> str:
-    w2v_model = load_w2v(w2v_path)
-
     (
         baskets_path,
         pop_global_path,
@@ -537,7 +429,7 @@ def ranker_training_pipeline_fast(
 
     candidates_path = generate_candidates_fast_to_parquet(
         baskets_path=baskets_path,
-        w2v_model=w2v_model,
+        w2v_model_path=w2v_path,
         topk=topk,
         artifacts_dir=artifacts_dir,
     )
