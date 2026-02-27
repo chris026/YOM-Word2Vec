@@ -15,7 +15,7 @@ FEATURE_COLS = [
     "pop_subch",
     "pop_origin",
     "pop_region",
-    "same_category",
+    #"same_category",
     "channel",
     "pop_store",
     "commune",
@@ -222,8 +222,8 @@ def recommend_candidates(
 if __name__ == "__main__":
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
-    anchor_pid = "000050-002"
-    userid = "0882f6f2bdce70370cd19337f9fdfd70"
+    anchor_pid = "000480-013"
+    userid = "3911b2008b1b87b1597371cec4d114eb"
     origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
