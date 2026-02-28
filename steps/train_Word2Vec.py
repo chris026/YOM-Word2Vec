@@ -120,7 +120,7 @@ def train_model(train_df: pl.DataFrame) -> str:
     sentences = PolarsBasketIterator(train_df)
     model = Word2Vec(
         sentences=sentences,
-        vector_size=226,
+        vector_size=35,
         window=100,
         sg=1,
         shrink_windows=False,

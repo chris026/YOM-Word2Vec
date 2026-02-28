@@ -6,63 +6,42 @@ import pandas as pd
 
 
 INPUT_CSV = Path(__file__).resolve().parent / "2024-20250001_part_00-001.csv"
-TEST_OUTPUT_CSV = Path(__file__).resolve().parent / "test_df.csv"
-TRAIN_OUTPUT_CSV = Path(__file__).resolve().parent / "train_df.csv"
+TEST_OUTPUT_CSV = Path(__file__).resolve().parent / "test_df_1m.csv"
+TRAIN_OUTPUT_CSV = Path(__file__).resolve().parent / "train_df_3m.csv"
 
-# Anzahl Wochen im Test-Split (vom neuesten Datum rueckwaerts)
-TEST_WEEKS = 4
+# Anzahl Kalendermonate im Test-Split (inkl. aktuellem, ggf. unvollstaendigem Monat)
+TEST_MONTHS = 1
 
-# Anzahl Wochen im Train-Split direkt vor dem Test-Split
-TRAIN_WEEKS = 12
+# Anzahl Kalendermonate im Train-Split direkt vor dem Test-Split
+TRAIN_MONTHS = 3
 
 # Groesse der CSV-Chunks fuer speichereffizientes Processing
-CHUNK_SIZE = 500_000
+CHUNK_SIZE = 1_000_000
 
 ORDER_DATE_COLUMN = "orderdt"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 READ_DTYPES = {"documentcode": "string"}
 
 
-def find_latest_order_date(csv_path: Path) -> pd.Timestamp:
-    latest_date: pd.Timestamp | None = None
-
-    for chunk in pd.read_csv(
-        csv_path,
-        usecols=[ORDER_DATE_COLUMN],
-        dtype={ORDER_DATE_COLUMN: "string"},
-        chunksize=CHUNK_SIZE,
-    ):
-        parsed_dates = pd.to_datetime(
-            chunk[ORDER_DATE_COLUMN],
-            format=DATE_FORMAT,
-            errors="coerce",
-        )
-        chunk_max = parsed_dates.max()
-
-        if pd.notna(chunk_max) and (latest_date is None or chunk_max > latest_date):
-            latest_date = chunk_max
-
-    if latest_date is None:
-        raise ValueError(
-            f"Kein gueltiges Datum in Spalte '{ORDER_DATE_COLUMN}' gefunden."
-        )
-
-    return latest_date
+def find_latest_order_date() -> pd.Timestamp:
+    return pd.Timestamp("2025-11-10 00:00:00")
 
 
 def build_splits() -> None:
-    if TEST_WEEKS <= 0:
-        raise ValueError("TEST_WEEKS muss groesser als 0 sein.")
-    if TRAIN_WEEKS <= 0:
-        raise ValueError("TRAIN_WEEKS muss groesser als 0 sein.")
+    if TEST_MONTHS <= 0:
+        raise ValueError("TEST_MONTHS muss groesser als 0 sein.")
+    if TRAIN_MONTHS <= 0:
+        raise ValueError("TRAIN_MONTHS muss groesser als 0 sein.")
     if not INPUT_CSV.exists():
         raise FileNotFoundError(f"Eingabedatei nicht gefunden: {INPUT_CSV}")
 
-    latest_order_date = find_latest_order_date(INPUT_CSV)
+    latest_order_date = find_latest_order_date()
 
-    test_start_exclusive = latest_order_date - pd.Timedelta(weeks=TEST_WEEKS)
-    train_end_inclusive = test_start_exclusive
-    train_start_exclusive = train_end_inclusive - pd.Timedelta(weeks=TRAIN_WEEKS)
+    latest_month_start = latest_order_date.to_period("M").to_timestamp()
+    test_start_inclusive = latest_month_start - pd.DateOffset(months=TEST_MONTHS - 1)
+    test_end_inclusive = latest_order_date
+    train_end_exclusive = test_start_inclusive
+    train_start_inclusive = train_end_exclusive - pd.DateOffset(months=TRAIN_MONTHS)
 
     for output_path in (TEST_OUTPUT_CSV, TRAIN_OUTPUT_CSV):
         if output_path.exists():
@@ -82,14 +61,14 @@ def build_splits() -> None:
         parsed_dates = pd.to_datetime(
             chunk[ORDER_DATE_COLUMN],
             format=DATE_FORMAT,
-            errors="coerce",
+            errors="raise",
         )
 
-        test_mask = parsed_dates.gt(test_start_exclusive) & parsed_dates.le(
-            latest_order_date
+        test_mask = parsed_dates.ge(test_start_inclusive) & parsed_dates.le(
+            test_end_inclusive
         )
-        train_mask = parsed_dates.gt(train_start_exclusive) & parsed_dates.le(
-            train_end_inclusive
+        train_mask = parsed_dates.ge(train_start_inclusive) & parsed_dates.lt(
+            train_end_exclusive
         )
 
         if test_mask.any():
@@ -121,12 +100,12 @@ def build_splits() -> None:
 
     print(f"Neuestes orderdt: {latest_order_date}")
     print(
-        f"test_df.csv: {test_rows} Zeilen fuer {TEST_WEEKS} Wochen "
-        f"({test_start_exclusive} .. {latest_order_date})"
+        f"test_df.csv: {test_rows} Zeilen fuer {TEST_MONTHS} Monate "
+        f"({test_start_inclusive} .. {test_end_inclusive})"
     )
     print(
-        f"train_df.csv: {train_rows} Zeilen fuer {TRAIN_WEEKS} Wochen "
-        f"({train_start_exclusive} .. {train_end_inclusive})"
+        f"train_df.csv: {train_rows} Zeilen fuer {TRAIN_MONTHS} Monate "
+        f"({train_start_inclusive} .. {train_end_exclusive}, Ende exklusiv)"
     )
 
 

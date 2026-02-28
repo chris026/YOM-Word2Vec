@@ -2,7 +2,7 @@ from zenml import step
 import polars as pl
 
 def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
-    schema_overrides = {
+    schema = {
         "orderid": pl.Utf8,
         "productid": pl.Utf8,
         "userid": pl.Utf8,
@@ -23,7 +23,7 @@ def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
 
     return pl.read_csv(
         path,
-        schema_overrides=schema_overrides
+        schema=schema
     ).filter(
         pl.col("orderid").is_not_null()
         & (pl.col("orderid").str.strip_chars() != "")
