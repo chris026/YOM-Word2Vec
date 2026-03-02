@@ -1,5 +1,6 @@
 from zenml import step
 import polars as pl
+import os
 
 def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
     schema = {
@@ -32,21 +33,12 @@ def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
     )
 
 @step
-def load_data_clean() -> str:
+def load_data() -> str:
     source_path = "data/2024-20250001_part_00-001.csv"
     target_path = "data/2024-20250001_part_00-001.parquet"
     products = _read_orders_csv_permissive(source_path)
     products.write_parquet(target_path)
     return target_path
-
-@step
-def load_data() -> str:
-    products = pl.read_csv("data/2024-20250001_part_00-001.csv", schema_overrides={
-        "priceperunit": pl.Float64,
-        "documentcode": pl.Utf8
-    })
-    products.write_parquet("data/2024-20250001_part_00-001.parquet")
-    return "data/2024-20250001_part_00-001.parquet"
 
 @step
 def load_products() -> str:
@@ -76,3 +68,25 @@ def save_train_test_split(
 def save_df(df: pl.DataFrame, path: str) -> str:
     df.write_parquet(path)
     return path
+
+@step
+def clean_blocked_products(orders_path: str, products_path: str) -> tuple[str, str]:
+    products_tmp = products_path + ".tmp"
+    orders_tmp = orders_path + ".tmp"
+
+    products = pl.scan_parquet(products_path)
+    products = products.filter(pl.col("blocked") == False)
+    products.sink_parquet(products_tmp)
+    os.replace(products_tmp, products_path)
+
+    valid_product_ids = pl.scan_parquet(products_path).select("productid").unique()
+
+    orders_clean = (
+        pl.scan_parquet(orders_path)
+        .join(valid_product_ids, on="productid", how="semi")
+    )
+
+    orders_clean.sink_parquet(orders_tmp)
+    os.replace(orders_tmp, orders_path)
+
+    return orders_path, products_path

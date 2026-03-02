@@ -60,7 +60,7 @@ def main() -> None:
     (
         store_meta,
         prod_cat,
-        prod_blocked,
+        #prod_blocked,
         pop_global,
         pop_store,
         pop_region,
@@ -100,7 +100,7 @@ def main() -> None:
             ranker=ranker,
             store_meta=store_meta,
             prod_cat=prod_cat,
-            prod_blocked=prod_blocked,
+            #prod_blocked=prod_blocked,
             pop_global=pop_global,
             pop_store=pop_store,
             pop_region=pop_region,

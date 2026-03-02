@@ -1,282 +1,231 @@
-﻿import argparse
-import csv
 import random
-import time
+from dataclasses import dataclass
 
-import numpy as np
+import pandas as pd
+import polars as pl
 from gensim.models import Word2Vec
+from tqdm import tqdm
 
 
-def summarize(values: np.ndarray) -> dict:
-    return {
-        "count": int(values.size),
-        "mean": float(np.mean(values)),
-        "median": float(np.median(values)),
-        "std": float(np.std(values)),
-        "min": float(np.min(values)),
-        "p05": float(np.percentile(values, 5)),
-        "p95": float(np.percentile(values, 95)),
-        "max": float(np.max(values)),
-    }
+# Global configuration (edit here, then run the file directly)
+MODEL_PATH = "models/word2vec.model"
+EVAL_ORDERS_PATH = "data/test_4weeks.csv"
+KS = [5, 10, 20, 50]
+RETRIEVAL_TOPK = 50
+MIN_BASKET_SIZE = 2
+EVAL_MAX_ORDERS = 10000  # 0 = all orders
+NUM_ANCHORS = 0  # 0 = all anchors
+SEED = 42
+SHOW_PROGRESS = True
 
 
-def sample_cosine_distances(model: Word2Vec, num_pairs: int, seed: int) -> tuple[np.ndarray, dict]:
-    rng = random.Random(seed)
-    vectors = model.wv.vectors
-    vocab_size = vectors.shape[0]
+@dataclass
+class EvalCounts:
+    hit_sum: float = 0.0
+    recall_sum: float = 0.0
+    mrr_sum: float = 0.0
+    precision_sum: float = 0.0
+    positives_sum: float = 0.0
 
-    if vocab_size < 2:
-        raise ValueError("Vokabular hat weniger als 2 Produkte.")
 
-    num_pairs = min(num_pairs, vocab_size * (vocab_size - 1) // 2)
-    distances = np.empty(num_pairs, dtype=np.float64)
+def validate_config() -> None:
+    if not KS or any(k <= 0 for k in KS):
+        raise ValueError("KS must contain positive integers, e.g. [5, 10, 20, 50]")
 
-    norms = np.linalg.norm(vectors, axis=1)
+    if RETRIEVAL_TOPK < max(KS):
+        raise ValueError(f"RETRIEVAL_TOPK ({RETRIEVAL_TOPK}) must be >= max(KS) ({max(KS)})")
 
-    for i in range(num_pairs):
-        a, b = rng.sample(range(vocab_size), 2)
 
-        na = norms[a]
-        nb = norms[b]
+def read_orders(path: str) -> pl.DataFrame:
+    lower = path.lower()
+    if lower.endswith(".parquet"):
+        df = pl.read_parquet(path, columns=["orderid", "productid"])
+    elif lower.endswith(".csv"):
+        df = pl.read_csv(
+            path,
+            columns=["orderid", "productid"],
+            schema_overrides={"orderid": pl.Utf8, "productid": pl.Utf8},
+        )
+    else:
+        raise ValueError(f"Unsupported file format: {path}. Use .csv or .parquet")
 
-        if na == 0.0 or nb == 0.0:
-            distances[i] = 1.0
+    return (
+        df.drop_nulls(["orderid", "productid"])
+        .with_columns(
+            pl.col("orderid").cast(pl.Utf8),
+            pl.col("productid").cast(pl.Utf8),
+        )
+    )
+
+
+def unique_preserve_order(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def build_anchor_tasks(
+    orders: pl.DataFrame,
+    min_basket_size: int,
+    eval_max_orders: int,
+) -> list[tuple[str, list[str]]]:
+    baskets = (
+        orders.group_by("orderid", maintain_order=True)
+        .agg(pl.col("productid"))
+        .with_columns(pl.col("productid").list.unique(maintain_order=True))
+        .filter(pl.col("productid").list.len() >= min_basket_size)
+    )
+
+    if eval_max_orders > 0:
+        baskets = baskets.head(eval_max_orders)
+
+    tasks: list[tuple[str, list[str]]] = []
+    for row in baskets.iter_rows(named=True):
+        basket = unique_preserve_order([str(x) for x in row["productid"]])
+        if len(basket) < min_basket_size:
             continue
-
-        cos_sim = float(np.dot(vectors[a], vectors[b]) / (na * nb))
-        cos_dist = 1.0 - cos_sim
-        distances[i] = cos_dist
-
-    return distances, summarize(distances)
+        for anchor in basket:
+            tasks.append((anchor, basket))
+    return tasks
 
 
-def reciprocal_neighbor_rate(
+def first_relevant_rank(pred: list[str], positives: set[str]) -> int | None:
+    for idx, pid in enumerate(pred, start=1):
+        if pid in positives:
+            return idx
+    return None
+
+
+def evaluate(
     model: Word2Vec,
-    topk: int = 10,
-    num_anchors: int = 300,
-    seed: int = 42,
-) -> dict:
+    tasks: list[tuple[str, list[str]]],
+    ks: list[int],
+    topk: int,
+    num_anchors: int,
+    seed: int,
+    show_progress: bool,
+) -> tuple[dict[int, EvalCounts], dict[str, int]]:
     rng = random.Random(seed)
-    keys = list(model.wv.index_to_key)
-    if not keys:
-        raise ValueError("Modell enthaelt keine Produkte.")
+    if num_anchors > 0 and len(tasks) > num_anchors:
+        tasks = rng.sample(tasks, k=num_anchors)
 
-    anchors = keys if len(keys) <= num_anchors else rng.sample(keys, num_anchors)
+    results = {k: EvalCounts() for k in ks}
 
-    checked_links = 0
-    reciprocal_links = 0
-
-    for anchor in anchors:
-        neighbors = model.wv.most_similar(anchor, topn=topk)
-
-        for nb, _ in neighbors:
-            nb_neighbors = model.wv.most_similar(nb, topn=topk)
-            nb_neighbor_ids = {pid for pid, _ in nb_neighbors}
-            checked_links += 1
-            if anchor in nb_neighbor_ids:
-                reciprocal_links += 1
-
-    rate = (reciprocal_links / checked_links) if checked_links else 0.0
-
-    return {
-        "anchors": len(anchors),
-        "topk": topk,
-        "checked_links": checked_links,
-        "reciprocal_links": reciprocal_links,
-        "reciprocal_rate": rate,
-    }
-
-
-def random_anchor_distance_extremes(
-    model: Word2Vec,
-    seed: int = 42,
-    topn: int = 10,
-) -> dict:
-    rng = random.Random(seed)
-    keys = list(model.wv.index_to_key)
-    if len(keys) < 2:
-        raise ValueError("Vokabular hat weniger als 2 Produkte.")
-
-    anchor = rng.choice(keys)
-    anchor_vec = model.wv[anchor]
-    anchor_norm = np.linalg.norm(anchor_vec)
-
-    if anchor_norm == 0.0:
-        raise ValueError(f"Anchor-Vektor hat Norm 0: {anchor}")
-
-    rows = []
-    for pid in keys:
-        if pid == anchor:
-            continue
-        vec = model.wv[pid]
-        n = np.linalg.norm(vec)
-        if n == 0.0:
-            cos_dist = 1.0
-        else:
-            cos_sim = float(np.dot(anchor_vec, vec) / (anchor_norm * n))
-            cos_dist = 1.0 - cos_sim
-        rows.append((pid, cos_dist))
-
-    rows_sorted = sorted(rows, key=lambda x: x[1])
-    nearest = rows_sorted[:topn]
-    farthest = list(reversed(rows_sorted[-topn:]))
-
-    return {
-        "anchor": anchor,
-        "nearest": nearest,
-        "farthest": farthest,
-    }
-
-
-def load_baskets_from_csv(csv_path: str, max_orders: int | None = None) -> list[list[str]]:
-    by_order = {}
-    with open(csv_path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            oid = row.get("orderid")
-            pid = row.get("productid")
-            if not oid or not pid:
-                continue
-            by_order.setdefault(oid, []).append(pid)
-
-    baskets = [items for items in by_order.values() if len(items) >= 2]
-    if max_orders is not None and len(baskets) > max_orders:
-        baskets = baskets[:max_orders]
-    return baskets
-
-
-def basket_retrieval_metrics(
-    model: Word2Vec,
-    baskets: list[list[str]],
-    topk: int = 10,
-) -> dict:
     total_anchors = 0
     used_anchors = 0
     oov_anchors = 0
-    hit_count = 0
-    rr_sum = 0.0
+    no_positive_anchors = 0
+    no_candidate_anchors = 0
 
-    for basket in baskets:
-        basket_set = set(basket)
-        for anchor in basket:
-            total_anchors += 1
-            if anchor not in model.wv:
-                oov_anchors += 1
-                continue
+    iterator = tasks
+    if show_progress:
+        iterator = tqdm(tasks, desc="Evaluating anchors", unit="anchor")
 
-            positives = basket_set - {anchor}
-            positives_in_vocab = {p for p in positives if p in model.wv}
-            if not positives_in_vocab:
-                continue
+    for anchor, basket in iterator:
+        total_anchors += 1
 
-            used_anchors += 1
-            retrieved = model.wv.most_similar(anchor, topn=topk)
-            retrieved_ids = [pid for pid, _ in retrieved]
+        if anchor not in model.wv:
+            oov_anchors += 1
+            continue
 
-            if any(pid in positives_in_vocab for pid in retrieved_ids):
-                hit_count += 1
+        positives = {p for p in basket if p != anchor and p in model.wv}
+        if not positives:
+            no_positive_anchors += 1
+            continue
 
-            rr = 0.0
-            for i, pid in enumerate(retrieved_ids, start=1):
-                if pid in positives_in_vocab:
-                    rr = 1.0 / i
-                    break
-            rr_sum += rr
+        try:
+            ranked = [pid for pid, _ in model.wv.most_similar(anchor, topn=topk)]
+        except KeyError:
+            oov_anchors += 1
+            continue
 
-    hit_rate = (hit_count / used_anchors) if used_anchors else 0.0
-    mrr = (rr_sum / used_anchors) if used_anchors else 0.0
-    oov_rate = (oov_anchors / total_anchors) if total_anchors else 0.0
+        if not ranked:
+            no_candidate_anchors += 1
+            continue
 
-    return {
-        "num_baskets": len(baskets),
+        used_anchors += 1
+
+        for k in ks:
+            pred = ranked[:k]
+            hits = sum(1 for pid in pred if pid in positives)
+
+            rr_rank = first_relevant_rank(pred, positives)
+            rr = 0.0 if rr_rank is None else (1.0 / rr_rank)
+
+            results[k].hit_sum += 1.0 if hits > 0 else 0.0
+            results[k].recall_sum += hits / len(positives)
+            results[k].mrr_sum += rr
+            results[k].precision_sum += hits / k
+            results[k].positives_sum += hits
+
+    coverage = {
         "total_anchors": total_anchors,
         "used_anchors": used_anchors,
         "oov_anchors": oov_anchors,
-        "oov_rate": oov_rate,
-        "hit_rate_at_k": hit_rate,
-        "mrr_at_k": mrr,
-        "k": topk,
+        "no_positive_anchors": no_positive_anchors,
+        "no_candidate_anchors": no_candidate_anchors,
     }
+    return results, coverage
 
 
-def print_summary(title: str, stats: dict) -> None:
-    print(f"\n=== {title} ===")
-    for k, v in stats.items():
-        if isinstance(v, float):
-            print(f"{k:>18}: {v:.6f}")
-        else:
-            print(f"{k:>18}: {v}")
+def to_report_frame(results: dict[int, EvalCounts], used_anchors: int) -> pd.DataFrame:
+    rows = []
+    denom = max(1, used_anchors)
+
+    for k in sorted(results):
+        agg = results[k]
+        rows.append(
+            {
+                "K": k,
+                "HitRate": agg.hit_sum / denom,
+                "Recall": agg.recall_sum / denom,
+                "MRR": agg.mrr_sum / denom,
+                "Precision": agg.precision_sum / denom,
+                "Positives": agg.positives_sum / denom,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Word2Vec Testbench")
-    parser.add_argument("--model-path", default="models/word2vec.model", help="Pfad zum Word2Vec-Modell")
-    parser.add_argument("--num-pairs", type=int, default=10000, help="Anzahl zufaelliger Produktpaare")
-    parser.add_argument("--num-anchors", type=int, default=300, help="Anzahl Zufallsanker fuer Reziprozitaets-Test")
-    parser.add_argument("--topk", type=int, default=10, help="Top-K Nachbarn im Reziprozitaets-Test")
-    parser.add_argument(
-        "--eval-orders-csv",
-        default="data/2024-20250001_part_00-001.csv",
-        help="CSV mit Order-Events fuer Basket-Retrieval-Test",
+    validate_config()
+
+    print("W2V Testbench")
+    print(f"model_path       : {MODEL_PATH}")
+    print(f"eval_orders_path : {EVAL_ORDERS_PATH}")
+    print(f"ks               : {KS}")
+    print(f"retrieval_topk   : {RETRIEVAL_TOPK}")
+
+    model = Word2Vec.load(MODEL_PATH)
+    orders = read_orders(EVAL_ORDERS_PATH)
+    tasks = build_anchor_tasks(
+        orders=orders,
+        min_basket_size=MIN_BASKET_SIZE,
+        eval_max_orders=EVAL_MAX_ORDERS,
     )
-    parser.add_argument("--eval-max-orders", type=int, default=10000, help="Maximale Anzahl Baskets fuer Eval")
-    parser.add_argument("--eval-k", type=int, default=10, help="K fuer HitRate/MRR Basket-Retrieval-Test")
-    parser.add_argument("--seed", type=int, default=42, help="Random Seed")
-    args = parser.parse_args()
 
-    t0 = time.time()
-    model = Word2Vec.load(args.model_path)
-    load_time = time.time() - t0
-
-    print("Word2Vec Testbench")
-    print(f"model_path         : {args.model_path}")
-    print(f"vocab_size         : {len(model.wv.index_to_key)}")
-    print(f"vector_size        : {model.vector_size}")
-    print(f"load_time_sec      : {load_time:.3f}")
-
-    _, dist_stats = sample_cosine_distances(
+    results, coverage = evaluate(
         model=model,
-        num_pairs=args.num_pairs,
-        seed=args.seed,
+        tasks=tasks,
+        ks=KS,
+        topk=RETRIEVAL_TOPK,
+        num_anchors=NUM_ANCHORS,
+        seed=SEED,
+        show_progress=SHOW_PROGRESS,
     )
-    print_summary("Random Pair Cosine Distance", dist_stats)
 
-    recip_stats = reciprocal_neighbor_rate(
-        model=model,
-        topk=args.topk,
-        num_anchors=args.num_anchors,
-        seed=args.seed,
-    )
-    print_summary("Top-K Reciprocity", recip_stats)
+    report_df = to_report_frame(results, used_anchors=coverage["used_anchors"])
 
-    extremes = random_anchor_distance_extremes(
-        model=model,
-        seed=args.seed,
-        topn=10,
-    )
-    print(f"\n=== Random Anchor Extremes (anchor={extremes['anchor']}) ===")
-    print("Top 10 naechste Woerter (niedrigste Cosine-Distanz):")
-    for pid, dist in extremes["nearest"]:
-        print(f"  {pid:>18}  dist={dist:.6f}")
+    print("\nCoverage")
+    print(f"total_anchors       : {coverage['total_anchors']}")
+    print(f"used_anchors        : {coverage['used_anchors']}")
+    print(f"oov_anchors         : {coverage['oov_anchors']}")
+    print(f"no_positive_anchors : {coverage['no_positive_anchors']}")
+    print(f"no_candidate_anchors: {coverage['no_candidate_anchors']}")
 
-    print("Top 10 entfernteste Woerter (hoechste Cosine-Distanz):")
-    for pid, dist in extremes["farthest"]:
-        print(f"  {pid:>18}  dist={dist:.6f}")
-
-    baskets = load_baskets_from_csv(
-        csv_path=args.eval_orders_csv,
-        max_orders=args.eval_max_orders,
-    )
-    retrieval_stats = basket_retrieval_metrics(
-        model=model,
-        baskets=baskets,
-        topk=args.eval_k,
-    )
-    print_summary("Basket Retrieval Quality", retrieval_stats)
-
-    print("\nHinweis:")
-    print("- Niedrigere mittlere Cosine-Distanz bedeutet dichtere Embeddings.")
-    print("- Hohe Reziprozitaet deutet auf stabile lokale Nachbarschaften hin.")
+    print("\nMetrics (mean over used anchors)")
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", 120)
+    print(report_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
 
 
 if __name__ == "__main__":

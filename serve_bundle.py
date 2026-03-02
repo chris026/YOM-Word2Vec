@@ -3,6 +3,7 @@ import pandas as pd
 import polars as pl
 import lightgbm as lgb
 from gensim.models import Word2Vec
+import time
 
 
 # -----------------------
@@ -15,7 +16,6 @@ FEATURE_COLS = [
     "pop_subch",
     "pop_origin",
     "pop_region",
-    #"same_category",
     "channel",
     "pop_store",
     "commune",
@@ -72,7 +72,7 @@ def build_lookup_dicts(
     }
 
     prod_cat = {_to_key(r["productid"]): r["category"] for r in products.iter_rows(named=True)}
-    prod_blocked = {_to_key(r["productid"]): bool(r["blocked"]) for r in products.iter_rows(named=True)}
+    #prod_blocked = {_to_key(r["productid"]): bool(r["blocked"]) for r in products.iter_rows(named=True)}
 
     # popularity lookup dicts
     pop_global = {
@@ -100,7 +100,8 @@ def build_lookup_dicts(
         for r in pl.read_parquet(pop_origin_path).iter_rows(named=True)
     }
 
-    return store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin
+    #return store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin
+    return store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin
 
 
 # -----------------------
@@ -115,7 +116,7 @@ def recommend_candidates(
     ranker: lgb.Booster,
     store_meta: dict,
     prod_cat: dict,
-    prod_blocked: dict,
+    #prod_blocked: dict,
     pop_global: dict,
     pop_store: dict,
     pop_region: dict,
@@ -150,8 +151,8 @@ def recommend_candidates(
             continue
         if cand in basket:
             continue
-        if prod_blocked.get(cand, False):
-            continue
+        #if prod_blocked.get(cand, False):
+        #    continue
         if cand not in w2v.wv:
             continue
 
@@ -166,7 +167,6 @@ def recommend_candidates(
     rows = []
     for cand, r_rank, w2v_sim in candidates:
         cand_cat = _to_key(prod_cat.get(cand, "UNKNOWN"))
-        same_cat = 1 if cand_cat == anchor_cat else 0
 
         pg = pop_global.get(cand, 0)
         ps = pop_store.get((userid, cand), 0)
@@ -187,7 +187,6 @@ def recommend_candidates(
                 "pop_subch": psub,
                 "pop_origin": po,
                 "pop_region": pr,
-                "same_category": same_cat,
                 "channel": channel,
                 "pop_store": ps,
                 "commune": commune,
@@ -223,12 +222,13 @@ if __name__ == "__main__":
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
     anchor_pid = "000480-013"
-    userid = "3911b2008b1b87b1597371cec4d114eb"
+    userid = "b0a75e15a8fe900abbcbe66d11494954"
     origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
-    store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+    #store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
         commerces_path="data/commerces.parquet",
         products_path="data/products_v2.parquet",
         pop_global_path="artifacts/pop_global.parquet",
@@ -242,7 +242,13 @@ if __name__ == "__main__":
         for r in pl.read_parquet("data/products_v2.parquet").select(["productid", "name"]).iter_rows(named=True)
     }
 
-    recs = recommend_candidates(
+    all_Products = ["000120-001", "000295-003", "000295-008", "000120-001", "000295-003", "000295-008", "000120-001", "000295-003", "000295-008", "000120-001"]
+
+    time_start = time.time()
+
+    for i in all_Products:
+        anchor_pid = i
+        recs = recommend_candidates(
         anchor=anchor_pid,
         userid=userid,
         origin=origin,
@@ -250,7 +256,7 @@ if __name__ == "__main__":
         ranker=ranker,
         store_meta=store_meta,
         prod_cat=prod_cat,
-        prod_blocked=prod_blocked,
+        #prod_blocked=prod_blocked,
         pop_global=pop_global,
         pop_store=pop_store,
         pop_region=pop_region,
@@ -259,22 +265,26 @@ if __name__ == "__main__":
         topk_retrieval=50,
         topn=10,
         basket=set(),  # falls gerade einen Warenkorb besteht, hier rein
-    )
+        )
 
-    anchor_pid = _to_key(anchor_pid)
-    anchor_name = prod_name.get(anchor_pid, "UNKNOWN")
-    print(f"Eingabeprodukt: {anchor_pid} | {anchor_name}")
+        anchor_pid = _to_key(anchor_pid)
+        anchor_name = prod_name.get(anchor_pid, "UNKNOWN")
+        print(f"Eingabeprodukt: {anchor_pid} | {anchor_name}")
 
-    recs_with_name = [
-        {
-            "productid": pid,
-            "name": prod_name.get(_to_key(pid), "UNKNOWN"),
-            "score": float(score),
-        }
-        for pid, score in recs
-    ]
-    recs_df = pd.DataFrame(recs_with_name, columns=["productid", "name", "score"])
-    if recs_df.empty:
-        print("Keine Empfehlungen gefunden.")
-    else:
-        print(recs_df.to_string(index=False))
+        recs_with_name = [
+            {
+                "productid": pid,
+                "name": prod_name.get(_to_key(pid), "UNKNOWN"),
+                "score": float(score),
+            }
+            for pid, score in recs
+        ]
+        recs_df = pd.DataFrame(recs_with_name, columns=["productid", "name", "score"])
+        if recs_df.empty:
+            print("Keine Empfehlungen gefunden.")
+        else:
+            print(recs_df.to_string(index=False))
+            
+    time_end = time.time()
+
+    print("Zeit: ", time_end - time_start)

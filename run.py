@@ -1,14 +1,15 @@
 from zenml import pipeline
-from steps.load_data import load_data_clean, load_products, load_commerces, save_train_test_split, save_df
+from steps.load_data import load_data, load_products, load_commerces, save_train_test_split, save_df, clean_blocked_products
 import steps.train_Word2Vec as word2vec_model
 from steps.train_lightGBM import ranker_training_pipeline_fast
 from steps.test_model import test_model
 
 @pipeline(enable_cache=True)
 def run_pipeline():
-    data_path = load_data_clean()
+    data_path = load_data()
     commerces_path = load_commerces()
     products_path = load_products()
+    data_path, products_path = clean_blocked_products(data_path, products_path)
     baskets_path = word2vec_model.build_baskets(data_path)
     train_df, test_df = word2vec_model.data_split(baskets_path)
     train_df_path, test_df_path = save_train_test_split(train_df, test_df)
