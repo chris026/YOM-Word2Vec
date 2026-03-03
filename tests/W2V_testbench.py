@@ -70,20 +70,22 @@ def build_anchor_tasks(
     baskets = (
         orders.group_by("orderid", maintain_order=True)
         .agg(pl.col("productid"))
-        .with_columns(pl.col("productid").list.unique(maintain_order=True))
+        .with_columns(pl.col("productid").list.unique())
         .filter(pl.col("productid").list.len() >= min_basket_size)
     )
 
     if eval_max_orders > 0:
         baskets = baskets.head(eval_max_orders)
 
-    tasks: list[tuple[str, list[str]]] = []
-    for row in baskets.iter_rows(named=True):
-        basket = unique_preserve_order([str(x) for x in row["productid"]])
-        if len(basket) < min_basket_size:
-            continue
-        for anchor in basket:
-            tasks.append((anchor, basket))
+    tasks_df = (
+        baskets.select([
+            pl.col("productid").alias("basket"),
+            pl.col("productid").alias("anchor")
+        ])
+        .explode("anchor")
+    )
+
+    tasks = list(tasks_df.select("anchor", "basket").iter_rows())
     return tasks
 
 
@@ -126,7 +128,7 @@ def evaluate(
             oov_anchors += 1
             continue
 
-        positives = {p for p in basket if p != anchor and p in model.wv}
+        positives = {p for p in basket if p != anchor}
         if not positives:
             no_positive_anchors += 1
             continue
@@ -166,9 +168,9 @@ def evaluate(
     return results, coverage
 
 
-def to_report_frame(results: dict[int, EvalCounts], used_anchors: int) -> pd.DataFrame:
+def to_report_frame(results: dict[int, EvalCounts], all_anchors: int) -> pd.DataFrame:
     rows = []
-    denom = max(1, used_anchors)
+    denom = max(1, all_anchors)
 
     for k in sorted(results):
         agg = results[k]
@@ -213,7 +215,7 @@ def main() -> None:
         show_progress=SHOW_PROGRESS,
     )
 
-    report_df = to_report_frame(results, used_anchors=coverage["used_anchors"])
+    report_df = to_report_frame(results, all_anchors=coverage["total_anchors"])
 
     print("\nCoverage")
     print(f"total_anchors       : {coverage['total_anchors']}")
@@ -222,7 +224,7 @@ def main() -> None:
     print(f"no_positive_anchors : {coverage['no_positive_anchors']}")
     print(f"no_candidate_anchors: {coverage['no_candidate_anchors']}")
 
-    print("\nMetrics (mean over used anchors)")
+    print("\nMetrics (mean over all anchors, including OOV)")
     pd.set_option("display.max_columns", None)
     pd.set_option("display.width", 120)
     print(report_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
