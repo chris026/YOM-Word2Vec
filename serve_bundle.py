@@ -161,9 +161,6 @@ def recommend_candidates(
     if not candidates:
         return []
 
-    # 3) feature matrix
-    anchor_cat = _to_key(prod_cat.get(anchor, "UNKNOWN"))
-
     rows = []
     for cand, r_rank, w2v_sim in candidates:
         cand_cat = _to_key(prod_cat.get(cand, "UNKNOWN"))
@@ -216,9 +213,64 @@ def recommend_candidates(
 
     return ranked[:topn]
 
+def getMultiRecs(anchors_df: pl.DataFrame) -> pl.DataFrame:
+    """
+    anchors_df must contains the colums "anchor_pid", "userid" and "origin".
+    """
+    w2v_path = "models/word2vec.model"
+    lgbm_path = "models/lgbm_ranker.txt"
 
-# Example usage
-if __name__ == "__main__":
+    w2v, ranker = load_models(w2v_path, lgbm_path)
+
+    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+        commerces_path="data/commerces.parquet",
+        products_path="data/products_v2.parquet",
+        pop_global_path="artifacts/pop_global.parquet",
+        pop_store_path="artifacts/pop_store.parquet",
+        pop_region_path="artifacts/pop_region.parquet",
+        pop_subch_path="artifacts/pop_subch.parquet",
+        pop_origin_path="artifacts/pop_origin.parquet",
+    )
+
+    results = []
+    for anchor_pid, userid, origin in anchors_df.iter_rows():
+        recs = recommend_candidates(
+            anchor=anchor_pid,
+            userid=userid,
+            origin=origin,
+            w2v=w2v,
+            ranker=ranker,
+            store_meta=store_meta,
+            prod_cat=prod_cat,
+            pop_global=pop_global,
+            pop_store=pop_store,
+            pop_region=pop_region,
+            pop_subch=pop_subch,
+            pop_origin=pop_origin,
+            topk_retrieval=50,
+            topn=10,
+            basket=set()
+        )
+
+        recs_to_add = [_to_key(pid) for pid, _ in recs]
+        results.append(
+            {
+                "anchor_id": _to_key(anchor_pid),
+                "userid": userid,
+                "origin": origin,
+                "recs": recs_to_add,   # List[str]
+            }
+        )
+
+    return pl.DataFrame(results, schema={
+        "anchor_id": pl.Utf8,
+        "userid": pl.Utf8,
+        "origin": pl.Utf8,
+        "recs": pl.List(pl.Utf8)
+        })
+
+
+def getSingleRec():
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
     anchor_pid = "000480-013"
@@ -256,7 +308,6 @@ if __name__ == "__main__":
         ranker=ranker,
         store_meta=store_meta,
         prod_cat=prod_cat,
-        #prod_blocked=prod_blocked,
         pop_global=pop_global,
         pop_store=pop_store,
         pop_region=pop_region,
@@ -288,3 +339,14 @@ if __name__ == "__main__":
     time_end = time.time()
 
     print("Zeit: ", time_end - time_start)
+
+if __name__ == "__main__":
+    input_df = pl.scan_csv("data/2024-20250001_part_00-001.csv")
+    input_df = (
+        input_df
+        .rename({"productid": "anchor_pid"})
+        .select(["anchor_pid", "userid", "origin"])
+        .unique(pl.col("userid"))
+    )
+    results = getMultiRecs(input_df.collect())
+    print(results)
