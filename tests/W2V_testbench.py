@@ -13,7 +13,7 @@ EVAL_ORDERS_PATH = "data/test_4weeks.csv"
 KS = [5, 10, 20, 50]
 RETRIEVAL_TOPK = 50
 MIN_BASKET_SIZE = 2
-EVAL_MAX_ORDERS = 10000  # 0 = all orders
+EVAL_MAX_ORDERS = 0  # 0 = all orders
 NUM_ANCHORS = 0  # 0 = all anchors
 SEED = 42
 SHOW_PROGRESS = True
