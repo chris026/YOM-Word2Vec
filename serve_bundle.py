@@ -341,12 +341,13 @@ def getSingleRec():
     print("Zeit: ", time_end - time_start)
 
 if __name__ == "__main__":
-    input_df = pl.scan_csv("data/2024-20250001_part_00-001.csv")
+    input_df = pl.scan_csv("data/2024-20250001_part_00-001_short.csv")
     input_df = (
         input_df
         .rename({"productid": "anchor_pid"})
         .select(["anchor_pid", "userid", "origin"])
         .unique(pl.col("userid"))
+        .head(100)
     )
     results = getMultiRecs(input_df.collect())
     print(results)
