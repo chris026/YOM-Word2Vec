@@ -2,7 +2,9 @@ from zenml import step
 import polars as pl
 import os
 
-def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
+def _read_orders_csv_permissive(path: str) -> pl.LazyFrame:
+    drop_items = ("documentcode", "tax", "currency", "discountperunit", "couponcode")
+
     schema = {
         "orderid": pl.Utf8,
         "productid": pl.Utf8,
@@ -22,7 +24,7 @@ def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
         "couponcode": pl.Utf8,
     }
 
-    return pl.read_csv(
+    return pl.scan_csv(
         path,
         schema=schema
     ).filter(
@@ -30,15 +32,31 @@ def _read_orders_csv_permissive(path: str) -> pl.DataFrame:
         & (pl.col("orderid").str.strip_chars() != "")
         & pl.col("productid").is_not_null()
         & (pl.col("productid").str.strip_chars() != "")
-    )
+    ).drop(drop_items)
 
 @step
 def load_data() -> str:
-    source_path = "data/2024-20250001_part_00-001.csv"
-    target_path = "data/2024-20250001_part_00-001.parquet"
+    source_path = "data/2024-20250001_part_00-001_short.csv"
+    target_path = "data/2024-20250001_part_00-001_short.parquet"
     products = _read_orders_csv_permissive(source_path)
-    products.write_parquet(target_path)
+
+    products.sink_parquet(target_path)
     return target_path
+
+@step
+def load_data_testTrain_seperated() -> tuple[str, str]:
+    source_path_train = "data/train_df_1m.csv"
+    target_path_train = "data/train_df_1m.parquet"
+    source_path_test = "data/test_df_1m.csv"
+    target_path_test = "data/test_df_1m.parquet"
+
+    products_train = _read_orders_csv_permissive(source_path_train)
+    products_test = _read_orders_csv_permissive(source_path_test)
+
+    products_train.sink_parquet(target_path_train)
+    products_test.sink_parquet(target_path_test)
+    
+    return target_path_train, target_path_test
 
 @step
 def load_products() -> str:
