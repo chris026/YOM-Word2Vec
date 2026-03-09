@@ -213,6 +213,156 @@ def recommend_candidates(
 
     return ranked[:topn]
 
+def getMultiRecsFast(anchors_df: pl.DataFrame, topn: int) -> pl.DataFrame:
+    """
+    anchors_df must contains the colums "anchor_pid", "userid" and "origin".
+    """
+    w2v_path = "models/word2vec.model"
+    lgbm_path = "models/lgbm_ranker.txt"
+
+    w2v, ranker = load_models(w2v_path, lgbm_path)
+
+    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+        commerces_path="data/commerces.parquet",
+        products_path="data/products_v2.parquet",
+        pop_global_path="artifacts/pop_global.parquet",
+        pop_store_path="artifacts/pop_store.parquet",
+        pop_region_path="artifacts/pop_region.parquet",
+        pop_subch_path="artifacts/pop_subch.parquet",
+        pop_origin_path="artifacts/pop_origin.parquet",
+    )
+
+    # 0) W2V-Cache: pro Anchor nur einmal topk_retrieval berechnen
+    topk_retrieval = 50
+
+    unique_anchors = {_to_key(k) for k in w2v.wv.key_to_index.keys()}
+
+    retrieval_cache: dict[str, list[tuple[str, float]]] = {}
+    for a in unique_anchors:
+        retrieval_cache[a] = [
+            (_to_key(cand), float(sim))
+            for cand, sim in w2v.wv.most_similar(a, topn=topk_retrieval)
+        ]
+
+    results = []
+    for anchor_pid, userid, origin in anchors_df.iter_rows():
+        anchor=anchor_pid
+        basket=set()
+
+        if anchor not in w2v.wv:
+            results.append(
+            {
+                "anchor_id": _to_key(anchor_pid),
+                "userid": userid,
+                "origin": origin,
+                "recs": ["Nichts in W2V"],   # List[str]
+            }
+            )
+            continue
+
+        ctx = store_meta.get(userid, {})
+        region = _to_key(ctx.get("region", "UNKNOWN"))
+        subch = _to_key(ctx.get("subchannel", "UNKNOWN"))
+        channel = _to_key(ctx.get("channel", "UNKNOWN"))
+        commune = _to_key(ctx.get("commune", "UNKNOWN"))
+
+        # 1) retrieve
+        #retrieved = w2v.wv.most_similar(anchor, topn=topk_retrieval)
+        retrieved = retrieval_cache.get(anchor, [])
+
+        # 2) build candidate list with rank
+        candidates = []
+        for rank, (cand, sim) in enumerate(retrieved, start=1):
+            cand = _to_key(cand)
+            if cand == anchor:
+                continue
+            if cand in basket:
+                continue
+            if cand not in w2v.wv:
+                continue
+
+            candidates.append((cand, rank, float(sim)))
+
+        if not candidates:
+            results.append(
+            {
+                "anchor_id": _to_key(anchor_pid),
+                "userid": userid,
+                "origin": origin,
+                "recs": ["2 nichts"],   # List[str]
+            }
+            )
+            continue
+
+        rows = []
+        for cand, r_rank, w2v_sim in candidates:
+            cand_cat = _to_key(prod_cat.get(cand, "UNKNOWN"))
+
+            pg = pop_global.get(cand, 0)
+            ps = pop_store.get((userid, cand), 0)
+            pr = pop_region.get((region, cand), 0)
+            psub = pop_subch.get((subch, cand), 0)
+            po = pop_origin.get((origin, cand), 0)
+
+            pg = np.log1p(pg)
+            ps = np.log1p(ps)
+            pr = np.log1p(pr)
+            psub = np.log1p(psub)
+            po = np.log1p(po)
+
+            rows.append(
+                {
+                    "sim_item2vec": w2v_sim,
+                    "pop_global": pg,
+                    "pop_subch": psub,
+                    "pop_origin": po,
+                    "pop_region": pr,
+                    "channel": channel,
+                    "pop_store": ps,
+                    "commune": commune,
+                    "cand_category": cand_cat,
+                    "origin": origin,
+                    "region": region,
+                    "subchannel": subch,
+                }
+            )
+
+        X = pd.DataFrame(rows, columns=FEATURE_COLS)
+        for col in CATEGORICAL_COLS:
+            X[col] = X[col].fillna("UNKNOWN").astype("category")
+        for col in FEATURE_COLS:
+            if col not in CATEGORICAL_COLS:
+                X[col] = pd.to_numeric(X[col], errors="coerce").fillna(0.0).astype(np.float32)
+
+        # 4) predict scores
+        scores = ranker.predict(X)
+
+        # 5) sort
+        ranked = sorted(
+            zip([c[0] for c in candidates], scores),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        recs = ranked[:topn]
+
+        recs_to_add = [_to_key(pid) for pid, _ in recs]
+        results.append(
+            {
+                "anchor_id": _to_key(anchor_pid),
+                "userid": userid,
+                "origin": origin,
+                "recs": recs_to_add,   # List[str]
+            }
+        )
+
+    return pl.DataFrame(results, schema={
+        "anchor_id": pl.Utf8,
+        "userid": pl.Utf8,
+        "origin": pl.Utf8,
+        "recs": pl.List(pl.Utf8)
+        })
+
 def getMultiRecs(anchors_df: pl.DataFrame) -> pl.DataFrame:
     """
     anchors_df must contains the colums "anchor_pid", "userid" and "origin".
@@ -268,7 +418,6 @@ def getMultiRecs(anchors_df: pl.DataFrame) -> pl.DataFrame:
         "origin": pl.Utf8,
         "recs": pl.List(pl.Utf8)
         })
-
 
 def getSingleRec():
     w2v_path = "models/word2vec.model"

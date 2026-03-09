@@ -11,11 +11,11 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from serve_bundle import getMultiRecs
+from serve_bundle import getMultiRecs, getMultiRecsFast
 
 
 # Global configuration
-TEST_DATA_PATH = ROOT_DIR / "data" / "test_df_1m.csv"
+TEST_DATA_PATH = ROOT_DIR / "data" / "2024-20250001_part_00-001.parquet"
 KS = [5, 10, 20, 50]
 RANDOM_SEED = 42
 MIN_BASKET_SIZE = 2
@@ -44,14 +44,8 @@ def read_orders(path: Path) -> pl.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Testdatei nicht gefunden: {path}")
 
-    df = pl.scan_csv(
+    df = pl.scan_parquet(
         str(path),
-        schema_overrides={
-            "orderid": pl.Utf8,
-            "productid": pl.Utf8,
-            "userid": pl.Utf8,
-            "origin": pl.Utf8,
-        }
     ).select(["orderid", "productid", "userid", "origin"])
 
     return (
@@ -107,7 +101,7 @@ def build_eval_tasks(
     return tasks
 
 
-def infer_bundles(tasks: list[EvalTask]) -> list[list[str]]:
+def infer_bundles(tasks: list[EvalTask], topn: int) -> list[list[str]]:
     anchors_df = pl.DataFrame(
         {
             "anchor_pid": [t.anchor for t in tasks],
@@ -116,7 +110,9 @@ def infer_bundles(tasks: list[EvalTask]) -> list[list[str]]:
         }
     )
 
-    bundle_df = getMultiRecs(anchors_df)
+    bundle_df = getMultiRecsFast(anchors_df, topn)
+    print(tasks)
+    print(bundle_df)
     if bundle_df.height != len(tasks):
         raise RuntimeError(
             f"Anzahl Bundle-Ergebnisse passt nicht: expected={len(tasks)} got={bundle_df.height}"
@@ -215,7 +211,7 @@ def main() -> None:
     if not tasks:
         raise RuntimeError("Keine gueltigen Anchor-Tasks aus den Testdaten erstellt.")
 
-    recs_per_task = infer_bundles(tasks)
+    recs_per_task = infer_bundles(tasks, max(KS))
     metrics, coverage = evaluate(tasks, recs_per_task, KS)
     print_report(metrics, coverage, recs_per_task)
 

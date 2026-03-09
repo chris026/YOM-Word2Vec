@@ -6,11 +6,12 @@ from steps.test_model import test_model
 
 @pipeline(enable_cache=False)
 def run_pipeline():
-    data_path_train, data_path_test = load_data_testTrain_seperated()
+    #data_path_train, data_path_test = load_data_testTrain_seperated()
+    data_path_train = load_data()
     commerces_path = load_commerces()
     products_path = load_products()
     data_path_train, products_path = clean_blocked_products(data_path_train, products_path)
-    data_path_test, _ = clean_blocked_products(data_path_test, products_path)
+    #data_path_test, _ = clean_blocked_products(data_path_test, products_path)
     train_df_path = word2vec_model.build_baskets(data_path_train)
     #train_df, test_df = word2vec_model.data_split(baskets_path)
     #train_df_path, test_df_path = save_train_test_split(train_df, test_df)
@@ -22,7 +23,8 @@ def run_pipeline():
     #train_df_all_colums, _ = word2vec_model.data_split(data_path_train)
     #train_df_all_colums_path = save_df(train_df_all_colums, "data/train_df_all_colums.parquet")
 
-    data_path_train_LGM, _ = load_data_testTrain_seperated()
+    #data_path_train_LGM, _ = load_data_testTrain_seperated()
+    data_path_train_LGM = load_data()
 
     LGM_model_path = ranker_training_pipeline_fast(
         orders_path=data_path_train_LGM,
