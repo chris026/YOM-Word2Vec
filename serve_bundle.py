@@ -4,6 +4,7 @@ import polars as pl
 import lightgbm as lgb
 from gensim.models import Word2Vec
 import time
+from tqdm.auto import tqdm
 
 
 # -----------------------
@@ -14,13 +15,13 @@ FEATURE_COLS = [
     "sim_item2vec",
     "pop_global",
     "pop_subch",
-    "pop_origin",
+    #"pop_origin",
     "pop_region",
     "channel",
     "pop_store",
     "commune",
     "cand_category",
-    "origin",
+    #"origin",
     "region",
     "subchannel",
 ]
@@ -29,7 +30,7 @@ CATEGORICAL_COLS = [
     "channel",
     "commune",
     "cand_category",
-    "origin",
+    #"origin",
     "region",
     "subchannel",
 ]
@@ -51,7 +52,7 @@ def build_lookup_dicts(
     pop_store_path: str,
     pop_region_path: str,
     pop_subch_path: str,
-    pop_origin_path: str,
+    #pop_origin_path: str,
 ):
     commerces = pl.read_parquet(commerces_path).select(
         ["userid", "region", "subchannel", "channel", "commune"]
@@ -94,14 +95,14 @@ def build_lookup_dicts(
         (_to_key(r["subchannel"]), _to_key(r["productid"])): int(r["pop_subch"])
         for r in pl.read_parquet(pop_subch_path).iter_rows(named=True)
     }
-
+    """
     pop_origin = {
         (_to_key(r["origin"]), _to_key(r["productid"])): int(r["pop_origin"])
         for r in pl.read_parquet(pop_origin_path).iter_rows(named=True)
     }
-
+    """
     #return store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin
-    return store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin
+    return store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch
 
 
 # -----------------------
@@ -111,7 +112,7 @@ def build_lookup_dicts(
 def recommend_candidates(
     anchor: str,
     userid: str,
-    origin: str,
+    #origin: str,
     w2v: Word2Vec,
     ranker: lgb.Booster,
     store_meta: dict,
@@ -121,7 +122,7 @@ def recommend_candidates(
     pop_store: dict,
     pop_region: dict,
     pop_subch: dict,
-    pop_origin: dict,
+    #pop_origin: dict,
     topk_retrieval: int = 50,
     topn: int = 10,
     basket: set[str] | None = None,
@@ -129,7 +130,7 @@ def recommend_candidates(
     basket = {_to_key(x) for x in (basket or set())}
     anchor = _to_key(anchor)
     userid = _to_key(userid)
-    origin = _to_key(origin)
+    #origin = _to_key(origin)
 
     if anchor not in w2v.wv:
         return []
@@ -169,26 +170,26 @@ def recommend_candidates(
         ps = pop_store.get((userid, cand), 0)
         pr = pop_region.get((region, cand), 0)
         psub = pop_subch.get((subch, cand), 0)
-        po = pop_origin.get((origin, cand), 0)
+        #po = pop_origin.get((origin, cand), 0)
 
         pg = np.log1p(pg)
         ps = np.log1p(ps)
         pr = np.log1p(pr)
         psub = np.log1p(psub)
-        po = np.log1p(po)
+        #po = np.log1p(po)
 
         rows.append(
             {
                 "sim_item2vec": w2v_sim,
                 "pop_global": pg,
                 "pop_subch": psub,
-                "pop_origin": po,
+                #"pop_origin": po,
                 "pop_region": pr,
                 "channel": channel,
                 "pop_store": ps,
                 "commune": commune,
                 "cand_category": cand_cat,
-                "origin": origin,
+                #"origin": origin,
                 "region": region,
                 "subchannel": subch,
             }
@@ -213,209 +214,132 @@ def recommend_candidates(
 
     return ranked[:topn]
 
-def getMultiRecsFast(anchors_df: pl.DataFrame, topn: int) -> pl.DataFrame:
+def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     """
     anchors_df must contains the colums "anchor_pid", "userid" and "origin".
     """
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
+    topn = 20
+    #anchors_df = anchors_df.drop("origin")
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
-    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch = build_lookup_dicts(
         commerces_path="data/commerces.parquet",
         products_path="data/products_v2.parquet",
         pop_global_path="artifacts/pop_global.parquet",
         pop_store_path="artifacts/pop_store.parquet",
         pop_region_path="artifacts/pop_region.parquet",
         pop_subch_path="artifacts/pop_subch.parquet",
-        pop_origin_path="artifacts/pop_origin.parquet",
+        #pop_origin_path="artifacts/pop_origin.parquet",
     )
 
-    # 0) W2V-Cache: pro Anchor nur einmal topk_retrieval berechnen
-    topk_retrieval = 50
+    unknown = "UNKNOWN"
 
     unique_anchors = {_to_key(k) for k in w2v.wv.key_to_index.keys()}
-
     retrieval_cache: dict[str, list[tuple[str, float]]] = {}
-    for a in unique_anchors:
-        retrieval_cache[a] = [
-            (_to_key(cand), float(sim))
-            for cand, sim in w2v.wv.most_similar(a, topn=topk_retrieval)
+    for anchor in unique_anchors:
+        retrieval_cache[anchor] = [
+            (cand, sim)
+            for cand, sim in w2v.wv.most_similar(anchor, topn=50)
         ]
 
     results = []
-    for anchor_pid, userid, origin in anchors_df.iter_rows():
-        anchor=anchor_pid
-        basket=set()
-
-        if anchor not in w2v.wv:
+    for anchor_pid, userid in tqdm(
+        anchors_df.iter_rows(),
+        total=anchors_df.height,
+        desc="Generate recommendations",
+    ):
+        retrieved = retrieval_cache.get(anchor_pid, [])
+        if not retrieved:
             results.append(
-            {
-                "anchor_id": _to_key(anchor_pid),
-                "userid": userid,
-                "origin": origin,
-                "recs": ["Nichts in W2V"],   # List[str]
-            }
+                {
+                    "anchor_id": anchor_pid,
+                    "kiosk_id": userid,
+                    #"origin": origin,
+                    "recs": [],
+                }
             )
             continue
 
         ctx = store_meta.get(userid, {})
-        region = _to_key(ctx.get("region", "UNKNOWN"))
-        subch = _to_key(ctx.get("subchannel", "UNKNOWN"))
-        channel = _to_key(ctx.get("channel", "UNKNOWN"))
-        commune = _to_key(ctx.get("commune", "UNKNOWN"))
+        region = ctx.get("region", unknown)
+        subch = ctx.get("subchannel", unknown)
+        channel = ctx.get("channel", unknown)
+        commune = ctx.get("commune", unknown)
 
-        # 1) retrieve
-        #retrieved = w2v.wv.most_similar(anchor, topn=topk_retrieval)
-        retrieved = retrieval_cache.get(anchor, [])
+        candidates: list[str] = []
+        sim_item2vec: list[float] = []
+        pop_global_vals: list[float] = []
+        pop_store_vals: list[float] = []
+        pop_region_vals: list[float] = []
+        pop_subch_vals: list[float] = []
+        #pop_origin_vals: list[float] = []
+        cand_cats: list[str] = []
 
-        # 2) build candidate list with rank
-        candidates = []
         for rank, (cand, sim) in enumerate(retrieved, start=1):
-            cand = _to_key(cand)
-            if cand == anchor:
-                continue
-            if cand in basket:
-                continue
-            if cand not in w2v.wv:
-                continue
+            candidates.append(cand)
+            sim_item2vec.append(sim)
+            pop_global_vals.append(float(np.log1p(pop_global.get(cand, 0))))
+            pop_store_vals.append(float(np.log1p(pop_store.get((userid, cand), 0))))
+            pop_region_vals.append(float(np.log1p(pop_region.get((region, cand), 0))))
+            pop_subch_vals.append(float(np.log1p(pop_subch.get((subch, cand), 0))))
+            #pop_origin_vals.append(float(np.log1p(pop_origin.get((origin, cand), 0))))
+            cand_cats.append(prod_cat.get(cand, unknown))
 
-            candidates.append((cand, rank, float(sim)))
-
-        if not candidates:
+        n_candidates = len(candidates)
+        if n_candidates == 0:
             results.append(
-            {
-                "anchor_id": _to_key(anchor_pid),
-                "userid": userid,
-                "origin": origin,
-                "recs": ["2 nichts"],   # List[str]
-            }
+                {
+                    "anchor_id": anchor_pid,
+                    "userid": userid,
+                    #"origin": origin,
+                    "recs": [],
+                }
             )
             continue
 
-        rows = []
-        for cand, r_rank, w2v_sim in candidates:
-            cand_cat = _to_key(prod_cat.get(cand, "UNKNOWN"))
+        X = pd.DataFrame(
+            {
+                "sim_item2vec": np.asarray(sim_item2vec, dtype=np.float32),
+                "pop_global": np.asarray(pop_global_vals, dtype=np.float32),
+                "pop_subch": np.asarray(pop_subch_vals, dtype=np.float32),
+                #"pop_origin": np.asarray(pop_origin_vals, dtype=np.float32),
+                "pop_region": np.asarray(pop_region_vals, dtype=np.float32),
+                "channel": pd.Categorical([channel] * n_candidates),
+                "pop_store": np.asarray(pop_store_vals, dtype=np.float32),
+                "commune": pd.Categorical([commune] * n_candidates),
+                "cand_category": pd.Categorical(cand_cats),
+                #"origin": pd.Categorical([origin] * n_candidates),
+                "region": pd.Categorical([region] * n_candidates),
+                "subchannel": pd.Categorical([subch] * n_candidates),
+            },
+            columns=FEATURE_COLS,
+        )
 
-            pg = pop_global.get(cand, 0)
-            ps = pop_store.get((userid, cand), 0)
-            pr = pop_region.get((region, cand), 0)
-            psub = pop_subch.get((subch, cand), 0)
-            po = pop_origin.get((origin, cand), 0)
-
-            pg = np.log1p(pg)
-            ps = np.log1p(ps)
-            pr = np.log1p(pr)
-            psub = np.log1p(psub)
-            po = np.log1p(po)
-
-            rows.append(
-                {
-                    "sim_item2vec": w2v_sim,
-                    "pop_global": pg,
-                    "pop_subch": psub,
-                    "pop_origin": po,
-                    "pop_region": pr,
-                    "channel": channel,
-                    "pop_store": ps,
-                    "commune": commune,
-                    "cand_category": cand_cat,
-                    "origin": origin,
-                    "region": region,
-                    "subchannel": subch,
-                }
-            )
-
-        X = pd.DataFrame(rows, columns=FEATURE_COLS)
-        for col in CATEGORICAL_COLS:
-            X[col] = X[col].fillna("UNKNOWN").astype("category")
-        for col in FEATURE_COLS:
-            if col not in CATEGORICAL_COLS:
-                X[col] = pd.to_numeric(X[col], errors="coerce").fillna(0.0).astype(np.float32)
-
-        # 4) predict scores
-        scores = ranker.predict(X)
-
-        # 5) sort
+        scores = np.asarray(ranker.predict(X), dtype=np.float32)
         ranked = sorted(
-            zip([c[0] for c in candidates], scores),
+            zip(candidates, scores),
             key=lambda x: x[1],
             reverse=True,
         )
-
         recs = ranked[:topn]
-
         recs_to_add = [_to_key(pid) for pid, _ in recs]
+
         results.append(
             {
-                "anchor_id": _to_key(anchor_pid),
+                "anchor_id": anchor_pid,
                 "userid": userid,
-                "origin": origin,
-                "recs": recs_to_add,   # List[str]
+                #"origin": origin,
+                "recs": recs_to_add,
             }
         )
 
     return pl.DataFrame(results, schema={
         "anchor_id": pl.Utf8,
         "userid": pl.Utf8,
-        "origin": pl.Utf8,
-        "recs": pl.List(pl.Utf8)
-        })
-
-def getMultiRecs(anchors_df: pl.DataFrame) -> pl.DataFrame:
-    """
-    anchors_df must contains the colums "anchor_pid", "userid" and "origin".
-    """
-    w2v_path = "models/word2vec.model"
-    lgbm_path = "models/lgbm_ranker.txt"
-
-    w2v, ranker = load_models(w2v_path, lgbm_path)
-
-    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
-        commerces_path="data/commerces.parquet",
-        products_path="data/products_v2.parquet",
-        pop_global_path="artifacts/pop_global.parquet",
-        pop_store_path="artifacts/pop_store.parquet",
-        pop_region_path="artifacts/pop_region.parquet",
-        pop_subch_path="artifacts/pop_subch.parquet",
-        pop_origin_path="artifacts/pop_origin.parquet",
-    )
-
-    results = []
-    for anchor_pid, userid, origin in anchors_df.iter_rows():
-        recs = recommend_candidates(
-            anchor=anchor_pid,
-            userid=userid,
-            origin=origin,
-            w2v=w2v,
-            ranker=ranker,
-            store_meta=store_meta,
-            prod_cat=prod_cat,
-            pop_global=pop_global,
-            pop_store=pop_store,
-            pop_region=pop_region,
-            pop_subch=pop_subch,
-            pop_origin=pop_origin,
-            topk_retrieval=50,
-            topn=10,
-            basket=set()
-        )
-
-        recs_to_add = [_to_key(pid) for pid, _ in recs]
-        results.append(
-            {
-                "anchor_id": _to_key(anchor_pid),
-                "userid": userid,
-                "origin": origin,
-                "recs": recs_to_add,   # List[str]
-            }
-        )
-
-    return pl.DataFrame(results, schema={
-        "anchor_id": pl.Utf8,
-        "userid": pl.Utf8,
-        "origin": pl.Utf8,
+        #"origin": pl.Utf8,
         "recs": pl.List(pl.Utf8)
         })
 
@@ -424,19 +348,19 @@ def getSingleRec():
     lgbm_path = "models/lgbm_ranker.txt"
     anchor_pid = "000480-013"
     userid = "b0a75e15a8fe900abbcbe66d11494954"
-    origin = "ZHH1"
+    #origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
     #store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
-    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
+    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch = build_lookup_dicts(
         commerces_path="data/commerces.parquet",
         products_path="data/products_v2.parquet",
         pop_global_path="artifacts/pop_global.parquet",
         pop_store_path="artifacts/pop_store.parquet",
         pop_region_path="artifacts/pop_region.parquet",
         pop_subch_path="artifacts/pop_subch.parquet",
-        pop_origin_path="artifacts/pop_origin.parquet",
+        #pop_origin_path="artifacts/pop_origin.parquet",
     )
     prod_name = {
         _to_key(r["productid"]): _to_key(r["name"])
@@ -452,7 +376,7 @@ def getSingleRec():
         recs = recommend_candidates(
         anchor=anchor_pid,
         userid=userid,
-        origin=origin,
+        #origin=origin,
         w2v=w2v,
         ranker=ranker,
         store_meta=store_meta,
@@ -461,7 +385,7 @@ def getSingleRec():
         pop_store=pop_store,
         pop_region=pop_region,
         pop_subch=pop_subch,
-        pop_origin=pop_origin,
+        #pop_origin=pop_origin,
         topk_retrieval=50,
         topn=10,
         basket=set(),  # falls gerade einen Warenkorb besteht, hier rein
@@ -494,9 +418,8 @@ if __name__ == "__main__":
     input_df = (
         input_df
         .rename({"productid": "anchor_pid"})
-        .select(["anchor_pid", "userid", "origin"])
+        .select(["anchor_pid", "userid"])
         .unique(pl.col("userid"))
-        .head(100)
     )
-    results = getMultiRecs(input_df.collect())
+    results = getMultiRec(input_df.collect())
     print(results)

@@ -4,6 +4,7 @@ import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from tqdm.auto import tqdm
 
 import polars as pl
 
@@ -11,11 +12,11 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from serve_bundle import getMultiRecs, getMultiRecsFast
+from serve_bundle import getMultiRec
 
 
 # Global configuration
-TEST_DATA_PATH = ROOT_DIR / "data" / "2024-20250001_part_00-001.parquet"
+TEST_DATA_PATH = ROOT_DIR / "data" / "test_df_1m.parquet"
 KS = [5, 10, 20, 50]
 RANDOM_SEED = 42
 MIN_BASKET_SIZE = 2
@@ -26,7 +27,6 @@ MAX_ORDERS = 0  # 0 = all orders
 class EvalTask:
     orderid: str
     userid: str
-    origin: str
     anchor: str
     positives: set[str]
 
@@ -46,17 +46,10 @@ def read_orders(path: Path) -> pl.DataFrame:
 
     df = pl.scan_parquet(
         str(path),
-    ).select(["orderid", "productid", "userid", "origin"])
+    ).select(["orderid", "productid", "userid"])
 
     return (
-        df.drop_nulls(["orderid", "productid", "userid", "origin"])
-        .with_columns(
-            pl.col("orderid").cast(pl.Utf8),
-            pl.col("productid").cast(pl.Utf8),
-            pl.col("userid").cast(pl.Utf8),
-            pl.col("origin").cast(pl.Utf8),
-        )
-        .head(100)
+        df.drop_nulls(["orderid", "productid", "userid"])
         .collect()
     )
 
@@ -71,8 +64,7 @@ def build_eval_tasks(
         orders.group_by("orderid")
         .agg(
             pl.col("productid").unique().alias("products"),
-            pl.col("userid").first(),
-            pl.col("origin").first(),
+            pl.col("userid").first()
         )
         .filter(pl.col("products").list.len() >= min_basket_size)
     )
@@ -82,7 +74,11 @@ def build_eval_tasks(
 
     rng = random.Random(seed)
     tasks: list[EvalTask] = []
-    for orderid, products, userid, origin in baskets.iter_rows():
+    for orderid, products, userid in tqdm(
+        baskets.iter_rows(),
+        total=baskets.height,
+        desc="Build eval tasks",
+    ):
         product_list = [str(p) for p in products if p is not None]
 
         anchor = rng.choice(product_list)
@@ -92,27 +88,23 @@ def build_eval_tasks(
             EvalTask(
                 orderid=orderid,
                 userid=userid,
-                origin=origin,
                 anchor=anchor,
-                positives=positives,
+                positives=positives
             )
         )
 
     return tasks
 
 
-def infer_bundles(tasks: list[EvalTask], topn: int) -> list[list[str]]:
+def infer_bundles(tasks: list[EvalTask]) -> list[list[str]]:
     anchors_df = pl.DataFrame(
         {
             "anchor_pid": [t.anchor for t in tasks],
-            "userid": [t.userid for t in tasks],
-            "origin": [t.origin for t in tasks],
+            "userid": [t.userid for t in tasks]
         }
     )
 
-    bundle_df = getMultiRecsFast(anchors_df, topn)
-    print(tasks)
-    print(bundle_df)
+    bundle_df = getMultiRec(anchors_df)
     if bundle_df.height != len(tasks):
         raise RuntimeError(
             f"Anzahl Bundle-Ergebnisse passt nicht: expected={len(tasks)} got={bundle_df.height}"
@@ -211,7 +203,7 @@ def main() -> None:
     if not tasks:
         raise RuntimeError("Keine gueltigen Anchor-Tasks aus den Testdaten erstellt.")
 
-    recs_per_task = infer_bundles(tasks, max(KS))
+    recs_per_task = infer_bundles(tasks)
     metrics, coverage = evaluate(tasks, recs_per_task, KS)
     print_report(metrics, coverage, recs_per_task)
 

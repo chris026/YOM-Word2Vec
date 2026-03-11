@@ -28,7 +28,7 @@ def prepare_data(
     commerces_path: str,
     products_path: str,
     artifacts_dir: str = "artifacts",
-) -> tuple[str, str, str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     """
     Returns:
       baskets_path,
@@ -50,7 +50,7 @@ def prepare_data(
         .agg(
             pl.col("productid").alias("basket"),
             pl.first("userid").alias("userid"),
-            pl.first("origin").alias("origin"),
+            #pl.first("origin").alias("origin"),
         )
     )
     baskets_path = _artifact_path(artifacts_dir, "baskets", "parquet")
@@ -59,7 +59,7 @@ def prepare_data(
     # --- popularity tables ---
     pop_global_lf = orders.group_by("productid").agg(pl.len().alias("pop_global"))
     pop_store_lf = orders.group_by(["userid", "productid"]).agg(pl.len().alias("pop_store"))
-    pop_origin_lf = orders.group_by(["origin", "productid"]).agg(pl.len().alias("pop_origin"))
+    #pop_origin_lf = orders.group_by(["origin", "productid"]).agg(pl.len().alias("pop_origin"))
 
     # For region/subchannel, join orders with commerces first
     orders_enriched = orders.join(
@@ -73,13 +73,13 @@ def prepare_data(
 
     pop_global_path = _artifact_path(artifacts_dir, "pop_global", "parquet")
     pop_store_path = _artifact_path(artifacts_dir, "pop_store", "parquet")
-    pop_origin_path = _artifact_path(artifacts_dir, "pop_origin", "parquet")
+    #pop_origin_path = _artifact_path(artifacts_dir, "pop_origin", "parquet")
     pop_region_path = _artifact_path(artifacts_dir, "pop_region", "parquet")
     pop_subch_path = _artifact_path(artifacts_dir, "pop_subch", "parquet")
 
     pop_global_lf.collect().write_parquet(pop_global_path)
     pop_store_lf.collect().write_parquet(pop_store_path)
-    pop_origin_lf.collect().write_parquet(pop_origin_path)
+    #pop_origin_lf.collect().write_parquet(pop_origin_path)
     pop_region_lf.collect().write_parquet(pop_region_path)
     pop_subch_lf.collect().write_parquet(pop_subch_path)
 
@@ -87,7 +87,7 @@ def prepare_data(
         baskets_path,
         pop_global_path,
         pop_store_path,
-        pop_origin_path,
+        #pop_origin_path,
         pop_region_path,
         pop_subch_path,
     )
@@ -276,7 +276,7 @@ def train2(
     products_path: str,
     pop_global_path: str,
     pop_store_path: str,
-    pop_origin_path: str,
+    #pop_origin_path: str,
     pop_region_path: str,
     pop_subch_path: str,
     ranker_lf_path: str,
@@ -297,7 +297,7 @@ def train2(
     Schema({'productid': String, 'name': String, 'category': String, 'subcategory': String, 'blocked': Boolean, 'packageunit': String, 'amountperpackage': Float64, 'boxunit': String, 'amountperbox': Int64, 'salesunit': String, 'description': String, 'categoricallevel1': String})
     """
 
-    baskets_meta_lf = baskets_lf.select(["orderid", "userid", "origin"])
+    baskets_meta_lf = baskets_lf.select(["orderid", "userid"])
     commerces_lf = commerces_lf.drop("sellerid", "active")
     products_lf = products_lf.select(["category", "productid"])
 
@@ -310,7 +310,7 @@ def train2(
     # Popularity joins
     pop_global_lf = pl.scan_parquet(pop_global_path)
     pop_store_lf  = pl.scan_parquet(pop_store_path)
-    pop_origin_lf = pl.scan_parquet(pop_origin_path)
+    #pop_origin_lf = pl.scan_parquet(pop_origin_path)
     pop_region_lf = pl.scan_parquet(pop_region_path)
     pop_subch_lf  = pl.scan_parquet(pop_subch_path)
     
@@ -318,13 +318,13 @@ def train2(
         ranker_lf
         .join(pop_global_lf, left_on="candidate", right_on="productid", how="left")
         .join(pop_store_lf, left_on=["userid", "candidate"], right_on=["userid", "productid"], how="left")
-        .join(pop_origin_lf, left_on=["origin", "candidate"], right_on=["origin", "productid"], how="left")
+        #.join(pop_origin_lf, left_on=["origin", "candidate"], right_on=["origin", "productid"], how="left")
         .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
         .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
         .with_columns(
             pl.col("pop_global").fill_null(0),
             pl.col("pop_store").fill_null(0),
-            pl.col("pop_origin").fill_null(0),
+            #pl.col("pop_origin").fill_null(0),
             pl.col("pop_region").fill_null(0),
             pl.col("pop_subch").fill_null(0),
         )
@@ -333,7 +333,7 @@ def train2(
     ranker_lf = ranker_lf.with_columns(
         pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8),
-        pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8),
+        #pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
@@ -343,13 +343,13 @@ def train2(
         "sim_item2vec",
         "pop_global",
         "pop_subch",
-        "pop_origin",
+        #"pop_origin",
         "pop_region",
         "channel",
         "pop_store",
         "commune",
         "cand_category",
-        "origin",
+        #"origin",
         "region",
         "subchannel",
         "label",
@@ -391,13 +391,13 @@ def train_ranker_from_files(
         "sim_item2vec",
         "pop_global",
         "pop_subch",
-        "pop_origin",
+        #"pop_origin",
         "pop_region",
         "channel",
         "pop_store",
         "commune",
         "cand_category",
-        "origin",
+        #"origin",
         "region",
         "subchannel",
     ]
@@ -405,7 +405,7 @@ def train_ranker_from_files(
         "channel",
         "commune",
         "cand_category",
-        "origin",
+        #"origin",
         "region",
         "subchannel",
     ]
@@ -459,7 +459,7 @@ def ranker_training_pipeline_fast(
         baskets_path,
         pop_global_path,
         pop_store_path,
-        pop_origin_path,
+        #pop_origin_path,
         pop_region_path,
         pop_subch_path,
     ) = prepare_data(
@@ -495,7 +495,7 @@ def ranker_training_pipeline_fast(
         products_path=products_path,
         pop_global_path=pop_global_path,
         pop_store_path=pop_store_path,
-        pop_origin_path=pop_origin_path,
+        #pop_origin_path=pop_origin_path,
         pop_region_path=pop_region_path,
         pop_subch_path=pop_subch_path,
         ranker_lf_path = train1_path,
