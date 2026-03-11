@@ -103,8 +103,6 @@ def generate_candidates_fast_to_parquet(
     w2v_model_path: str,
     artifacts_dir: str = "artifacts",
 ) -> str:
-    baskets_df = pl.read_parquet(baskets_path)
-
     w2v_model = Word2Vec.load(w2v_model_path)
     wv = w2v_model.wv
     try:
@@ -127,7 +125,9 @@ def generate_candidates_fast_to_parquet(
             "sim_item2vec": pl.Float32,
     },
         orient="row")
-    neigh_df.write_csv(_artifact_path(artifacts_dir, "neigh_df", "csv"))
+    
+    neigh_df_path = _artifact_path(artifacts_dir, "neigh_df", "csv")
+    neigh_df.write_csv(neigh_df_path)
     out_path = _artifact_path(artifacts_dir, "candidates", "parquet")
 
     """
@@ -136,14 +136,15 @@ def generate_candidates_fast_to_parquet(
     neigh_df.schema
     Schema({'anchor': String, 'candidate': String, 'sim_item2vec': Float32})
     """
-
+    
+    baskets_df = pl.scan_parquet(baskets_path)
     (
         baskets_df
         .select(["orderid", "basket"])
         .explode("basket")
         .rename({"basket": "anchor"})
-        .join(neigh_df, on="anchor", how="inner")
-        .write_parquet(out_path)
+        .join(pl.scan_csv(neigh_df_path, schema_overrides={"sim_item2vec": pl.Float32}), on="anchor", how="inner")
+        .sink_parquet(out_path)
     )
 
     return out_path
@@ -410,15 +411,28 @@ def train_ranker_from_files(
         "subchannel",
     ]
 
-    train_df = pl.scan_parquet(train_parquet_path).select(feature_cols + ["label"]).collect()
-    groups = np.load(groups_npy_path)
+    train_lf = (
+        pl.scan_parquet(train_parquet_path)
+        .select(feature_cols + ["label"])
+        .with_columns(
+            pl.col("sim_item2vec").fill_null(0.0).cast(pl.Float32),
+            pl.col("pop_global").fill_null(0).cast(pl.UInt32),
+            pl.col("pop_subch").fill_null(0).cast(pl.UInt16),
+            pl.col("pop_region").fill_null(0).cast(pl.UInt16),
+            pl.col("pop_store").fill_null(0).cast(pl.UInt8),
+            pl.col("channel").fill_null("UNKNOWN"),
+            pl.col("commune").fill_null("UNKNOWN"),
+            pl.col("cand_category").fill_null("UNKNOWN"),
+            pl.col("region").fill_null("UNKNOWN"),
+            pl.col("subchannel").fill_null("UNKNOWN"),
+        )
+    )
 
-    train_pd = train_df.select(feature_cols + ["label"]).to_pandas()
-    for col in categorical_cols:
-        train_pd[col] = train_pd[col].fillna("UNKNOWN").astype("category")
-    for col in feature_cols:
-        if col not in categorical_cols:
-            train_pd[col] = pd.to_numeric(train_pd[col], errors="coerce").fillna(0.0).astype(np.float32)
+    train_df = train_lf.collect()
+    train_pd = train_df.to_pandas()
+
+    for c in categorical_cols:
+        train_pd[c] = train_pd[c].astype("category")
 
     X = train_pd[feature_cols]
     y = train_df.select("label").to_numpy().ravel()
@@ -430,11 +444,11 @@ def train_ranker_from_files(
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
-        reg_lambda=1.0,
         random_state=42,
         force_row_wise=True
     )
 
+    groups = np.load(groups_npy_path)
     model.fit(X, y, group=groups, categorical_feature=categorical_cols)
 
     model_path = "models/lgbm_ranker.txt"

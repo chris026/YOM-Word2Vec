@@ -17,7 +17,7 @@ from serve_bundle import getMultiRec
 
 # Global configuration
 TEST_DATA_PATH = ROOT_DIR / "data" / "test_df_1m.parquet"
-KS = [5, 10, 20, 50]
+KS = [5, 10, 20]
 RANDOM_SEED = 42
 MIN_BASKET_SIZE = 2
 MAX_ORDERS = 0  # 0 = all orders
