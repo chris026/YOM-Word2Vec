@@ -129,8 +129,29 @@ def recommend_candidates(
     userid = _to_key(userid)
     #origin = _to_key(origin)
 
-    if anchor not in w2v.wv:
-        return []
+    retrieved = []
+    if anchor in w2v.wv:
+        retrieved = w2v.wv.most_similar(anchor, topn=max(50, topn))
+    else:
+        fallback_n = max(0, 2 * int(topn))
+        if fallback_n == 0:
+            return []
+
+        for rank, (cand, _) in enumerate(
+            sorted(pop_global.items(), key=lambda x: x[1], reverse=True),
+            start=1,
+        ):
+            cand = _to_key(cand)
+            if cand == anchor:
+                continue
+            if cand in basket:
+                continue
+            retrieved.append((rank, (cand, 0.0)))
+            if len(retrieved) >= fallback_n:
+                break
+
+        if not retrieved:
+            return []
 
     ctx = store_meta.get(userid, {})
     region = _to_key(ctx.get("region", "UNKNOWN"))
@@ -139,7 +160,7 @@ def recommend_candidates(
     commune = _to_key(ctx.get("commune", "UNKNOWN"))
 
     # 1) retrieve
-    retrieved = w2v.wv.most_similar(anchor, topn=max(50, topn))
+    #retrieved = w2v.wv.most_similar(anchor, topn=max(50, topn))
 
     # 2) build candidate list with rank
     candidates = []
@@ -157,7 +178,25 @@ def recommend_candidates(
         candidates.append((cand, rank, float(sim)))
 
     if not candidates:
-        return []
+        fallback_n = max(0, 2 * int(topn))
+        if fallback_n == 0:
+            return []
+
+        for rank, (cand, _) in enumerate(
+            sorted(pop_global.items(), key=lambda x: x[1], reverse=True),
+            start=1,
+        ):
+            cand = _to_key(cand)
+            if cand == anchor:
+                continue
+            if cand in basket:
+                continue
+            candidates.append((cand, rank, 0.0))
+            if len(candidates) >= fallback_n:
+                break
+
+        if not candidates:
+            return []
 
     rows = []
     for cand, r_rank, w2v_sim in candidates:
@@ -213,7 +252,7 @@ def recommend_candidates(
 
 def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     """
-    anchors_df must contains the colums "anchor_pid" and "kiosk_id".
+    anchors_df must contains the colums "anchor_pid" and "userid".
     """
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
@@ -250,15 +289,30 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     ):
         retrieved = retrieval_cache.get(anchor_pid, [])
         if not retrieved:
-            results.append(
+            fallback_n = max(0, 2 * int(topn))
+            if fallback_n == 0:
+                return []
+
+            for rank, (cand, _) in enumerate(
+                sorted(pop_global.items(), key=lambda x: x[1], reverse=True),
+                start=1,
+            ):
+                cand = _to_key(cand)
+                if cand == anchor_pid:
+                    continue
+                retrieved.append((cand, 0.0))
+                if len(retrieved) >= fallback_n:
+                    break
+
+            if not retrieved:
+                results.append(
                 {
                     "anchor_id": anchor_pid,
                     "kiosk_id": userid,
-                    #"origin": origin,
                     "recs": [],
                 }
-            )
-            continue
+                )
+                continue
 
         ctx = store_meta.get(userid, {})
         region = ctx.get("region", unknown)
@@ -400,8 +454,8 @@ def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: boo
     return_df = (
         pl.DataFrame(
             {
-                "anchor_id": anchor_id * len(recs),
-                "user_id": user_id * len(recs),
+                "anchor_id": anchor_id,
+                "user_id": user_id,
                 "product_id": [_to_key(pid) for pid, _ in recs],
                 "score": [float(score) for _, score in recs],
             }
@@ -432,5 +486,8 @@ if __name__ == "__main__":
     print(results)
     """
     """
-    print(getSingleRec("000295-003", "9077130ee9894b2d1e6d3341b341e006", topn=5))
+    print(getSingleRec("000295-999", "9077130ee9894b2d1e6d3341b341e006", topn=5, addDebugInfo = True))
+    
+    data = {"anchor_pid": ["000295-003"], "userid": ["9077130ee9894b2d1e6d3341b341e006"]}
+    print(getMultiRec(pl.DataFrame(data, schema={"anchor_pid": str, "userid": str})))
     """
