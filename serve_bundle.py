@@ -3,7 +3,6 @@ import pandas as pd
 import polars as pl
 import lightgbm as lgb
 from gensim.models import Word2Vec
-import time
 from tqdm.auto import tqdm
 
 
@@ -43,7 +42,6 @@ def load_models(w2v_path: str, lgbm_path: str):
     w2v = Word2Vec.load(w2v_path)
     ranker = lgb.Booster(model_file=lgbm_path)
     return w2v, ranker
-
 
 def build_lookup_dicts(
     commerces_path: str,
@@ -123,7 +121,6 @@ def recommend_candidates(
     pop_region: dict,
     pop_subch: dict,
     #pop_origin: dict,
-    topk_retrieval: int = 50,
     topn: int = 10,
     basket: set[str] | None = None,
 ):
@@ -142,7 +139,7 @@ def recommend_candidates(
     commune = _to_key(ctx.get("commune", "UNKNOWN"))
 
     # 1) retrieve
-    retrieved = w2v.wv.most_similar(anchor, topn=topk_retrieval)
+    retrieved = w2v.wv.most_similar(anchor, topn=max(50, topn))
 
     # 2) build candidate list with rank
     candidates = []
@@ -343,11 +340,9 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
         "recs": pl.List(pl.Utf8)
         })
 
-def getSingleRec():
+def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: bool = False) -> pl.DataFrame:
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
-    anchor_pid = "000480-013"
-    userid = "b0a75e15a8fe900abbcbe66d11494954"
     #origin = "ZHH1"
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
@@ -367,15 +362,9 @@ def getSingleRec():
         for r in pl.read_parquet("data/products_v2.parquet").select(["productid", "name"]).iter_rows(named=True)
     }
 
-    all_Products = ["000120-001", "000295-003", "000295-008", "000120-001", "000295-003", "000295-008", "000120-001", "000295-003", "000295-008", "000120-001"]
-
-    time_start = time.time()
-
-    for i in all_Products:
-        anchor_pid = i
-        recs = recommend_candidates(
-        anchor=anchor_pid,
-        userid=userid,
+    recs = recommend_candidates(
+        anchor=anchor_id,
+        userid=user_id,
         #origin=origin,
         w2v=w2v,
         ranker=ranker,
@@ -386,34 +375,52 @@ def getSingleRec():
         pop_region=pop_region,
         pop_subch=pop_subch,
         #pop_origin=pop_origin,
-        topk_retrieval=50,
-        topn=10,
+        topn=topn,
         basket=set(),  # falls gerade einen Warenkorb besteht, hier rein
-        )
+    )
 
-        anchor_pid = _to_key(anchor_pid)
-        anchor_name = prod_name.get(anchor_pid, "UNKNOWN")
-        print(f"Eingabeprodukt: {anchor_pid} | {anchor_name}")
+    anchor_name = prod_name.get(anchor_id, "UNKNOWN")
+    print(f"Eingabeprodukt: {anchor_id} | {anchor_name}")
 
-        recs_with_name = [
+    recs_with_name = [
+        {
+            "productid": pid,
+            "name": prod_name.get(_to_key(pid), "UNKNOWN"),
+            "score": float(score),
+        }
+        for pid, score in recs
+    ]
+    recs_df = pd.DataFrame(recs_with_name, columns=["productid", "name", "score"])
+    if recs_df.empty:
+        print("Keine Empfehlungen gefunden.")
+    else:
+        print(recs_df.to_string(index=False))
+
+    
+    return_df = (
+        pl.DataFrame(
             {
-                "productid": pid,
-                "name": prod_name.get(_to_key(pid), "UNKNOWN"),
-                "score": float(score),
+                "anchor_id": anchor_id * len(recs),
+                "user_id": user_id * len(recs),
+                "product_id": [_to_key(pid) for pid, _ in recs],
+                "score": [float(score) for _, score in recs],
             }
-            for pid, score in recs
-        ]
-        recs_df = pd.DataFrame(recs_with_name, columns=["productid", "name", "score"])
-        if recs_df.empty:
-            print("Keine Empfehlungen gefunden.")
-        else:
-            print(recs_df.to_string(index=False))
-            
-    time_end = time.time()
+        )
+        .with_columns(
+            pl.col("product_id")
+            .map_elements(lambda pid: prod_name.get(pid, "UNKNOWN"), return_dtype=pl.Utf8)
+            .alias("name")
+        )
+        .select(
+            ["anchor_id", "user_id", "product_id"] + (["name", "score"] if addDebugInfo else [])
+        )
+    )
 
-    print("Zeit: ", time_end - time_start)
+
+    return return_df
 
 if __name__ == "__main__":
+    """
     input_df = pl.scan_csv("data/2024-20250001_part_00-001_short.csv")
     input_df = (
         input_df
@@ -423,3 +430,7 @@ if __name__ == "__main__":
     )
     results = getMultiRec(input_df.collect())
     print(results)
+    """
+    """
+    print(getSingleRec("000295-003", "9077130ee9894b2d1e6d3341b341e006", topn=5))
+    """
