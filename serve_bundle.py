@@ -216,7 +216,7 @@ def recommend_candidates(
 
 def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     """
-    anchors_df must contains the colums "anchor_pid", "userid" and "origin".
+    anchors_df must contains the colums "anchor_pid" and "kiosk_id".
     """
     w2v_path = "models/word2vec.model"
     lgbm_path = "models/lgbm_ranker.txt"
