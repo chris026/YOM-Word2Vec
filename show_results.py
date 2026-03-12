@@ -56,8 +56,13 @@ def plot_dataset(df: pd.DataFrame, title: str, output_path: Path | None = None) 
     if not available_metrics:
         raise ValueError("Keine darstellbaren Metrik-Spalten gefunden.")
 
+    include_k5_impact = (
+        "Recall" in df.columns and "HitRate" in df.columns and not df[df["K"] == 5].empty
+    )
+    total_plots = len(available_metrics) + (1 if include_k5_impact else 0)
+
     ncols = 3
-    nrows = math.ceil(len(available_metrics) / ncols)
+    nrows = math.ceil(total_plots / ncols)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 4.5 * nrows))
     axes_flat = axes.ravel() if hasattr(axes, "ravel") else [axes]
 
@@ -79,7 +84,26 @@ def plot_dataset(df: pd.DataFrame, title: str, output_path: Path | None = None) 
         if idx == 0:
             ax.legend(title="Training data")
 
-    for idx in range(len(available_metrics), len(axes_flat)):
+    if include_k5_impact:
+        impact_df = df[df["K"] == 5].copy().sort_values("Model")
+        impact_ax = axes_flat[len(available_metrics)]
+        for metric in ["Recall"]:
+            impact_ax.plot(
+                impact_df["Model"],
+                impact_df[metric],
+                marker="o",
+                linewidth=2,
+                label=metric,
+            )
+        impact_ax.set_title("K=5: Impact of More Training Data")
+        impact_ax.set_xlabel("Training data (months)")
+        #impact_ax.set_ylabel("Percent")
+        impact_ax.set_xticks(impact_df["Model"].astype(int).tolist())
+        #impact_ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+        impact_ax.grid(True, alpha=0.3)
+        impact_ax.legend(title="Metric")
+
+    for idx in range(total_plots, len(axes_flat)):
         axes_flat[idx].axis("off")
 
     fig.suptitle(title, fontsize=14)

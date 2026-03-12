@@ -1,0 +1,48 @@
+Model Test — LightGBM LambdaRank + MBA 1 month
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,657632   0,132318   0,556212   0,273712   1,368560
+  10   0,689639   0,156963   0,560560   0,173188   1,731882
+  20   0,712514   0,178792   0,562151   0,103821   2,076413
+
+Model Test — LightGBM LambdaRank + MBA 2 months
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,673827   0,137267   0,574643   0,283651   1,418253
+  10   0,701365   0,161339   0,578458   0,178753   1,787534
+  20   0,720012   0,180071   0,579783   0,105202   2,104047
+
+Model Test — LightGBM LambdaRank + MBA 3 months
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,682045   0,140588   0,583714   0,291426   1,457132
+  10   0,708237   0,165422   0,587313   0,184770   1,847703
+  20   0,725875   0,184234   0,588542   0,108533   2,170656
+
+Model Test - Word2Vec + LightGBM 1 month
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,667756   0,125138   0,433547   0,285397   1,426985
+  10   0,771775   0,210389   0,447806   0,266958   2,669583
+  20   0,842098   0,316110   0,452733   0,220068   4,401365
+
+Model Test - Word2Vec + LightGBM 2 months
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,702942   0,133886   0,457825   0,294001   1,470006
+  10   0,807201   0,230116   0,472317   0,282691   2,826908
+  20   0,861902   0,361415   0,476258   0,244532   4,890646
+
+
+Model Test - Word2Vec + LightGBM 3 months
+Metrics (mean over used anchors)
+   K    HitRate     Recall        MRR  Precision  Positives
+-----------------------------------------------------------
+   5   0,709815   0,133435   0,468898   0,289117   1,445587
+  10   0,817775   0,229946   0,483842   0,278211   2,782109
+  20   0,876754   0,373847   0,488111   0,248375   4,967506
