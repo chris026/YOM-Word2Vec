@@ -115,7 +115,7 @@ def data_split_monthly(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
 
     return train_df, test_df
 
-@step(enable_cache=True)
+@step(enable_cache=False)
 def train_model(train_df_path: str) -> str:
     train_df = pl.read_parquet(train_df_path)
     sentences = PolarsBasketIterator(train_df)

@@ -2,7 +2,6 @@ import os
 import polars as pl
 import numpy as np
 import lightgbm as lgb
-import pandas as pd
 
 from gensim.models import Word2Vec
 from zenml import step, pipeline
@@ -445,7 +444,8 @@ def train_ranker_from_files(
         subsample=0.8,
         colsample_bytree=0.8,
         random_state=42,
-        force_row_wise=True
+        force_row_wise=True,
+        n_jobs=max(1, os.cpu_count() - 1)
     )
 
     groups = np.load(groups_npy_path)
