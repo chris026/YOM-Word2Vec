@@ -11,7 +11,7 @@ env:
   AWS_ACCOUNT_ID: "124661688886"
   ECR_REPOSITORY: yom-backend
   LAMBDA_FUNCTION_NAME: yom-backend
-  S3_BUCKET: yom-word2vec-assets
+  S3_BUCKET: yom-word2vec-assets-124661688886-eu-central-1-an
 
 jobs:
   deploy:
