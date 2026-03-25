@@ -11,6 +11,7 @@ env:
   AWS_ACCOUNT_ID: "124661688886"
   ECR_REPOSITORY: yom-backend
   LAMBDA_FUNCTION_NAME: yom-backend
+  S3_BUCKET: yom-word2vec-assets
 
 jobs:
   deploy:
@@ -37,6 +38,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Download assets from S3
+        run: |
+          mkdir -p models artifacts data
+
+          aws s3 cp s3://${S3_BUCKET}/models/ models/ --recursive
+          aws s3 cp s3://${S3_BUCKET}/artifacts/ artifacts/ --recursive
+          aws s3 cp s3://${S3_BUCKET}/data/ data/ --recursive
 
       - name: Build and push Docker image
         run: |
