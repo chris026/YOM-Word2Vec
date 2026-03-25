@@ -1,0 +1,1 @@
+Test if pipeline builds automatically on push

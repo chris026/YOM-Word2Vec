@@ -4,8 +4,23 @@ import polars as pl
 import lightgbm as lgb
 from gensim.models import Word2Vec
 from tqdm.auto import tqdm
+from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent
 
+MODELS_DIR = REPO_ROOT / "models"
+DATA_DIR = REPO_ROOT / "data"
+ARTIFACTS_DIR = REPO_ROOT / "artifacts"
+
+_W2V = None
+_RANKER = None
+_STORE_META = None
+_PROD_CAT = None
+_POP_GLOBAL = None
+_POP_STORE = None
+_POP_REGION = None
+_POP_SUBCH = None
+_PROD_NAME = None
 # -----------------------
 # Load artifacts
 # -----------------------
@@ -34,6 +49,59 @@ CATEGORICAL_COLS = [
     "subchannel",
 ]
 
+def get_runtime_objects():
+    global _W2V, _RANKER
+    global _STORE_META, _PROD_CAT, _POP_GLOBAL, _POP_STORE, _POP_REGION, _POP_SUBCH
+    global _PROD_NAME
+
+    if _W2V is None or _RANKER is None:
+        w2v_path = str(MODELS_DIR / "word2vec.model")
+        lgbm_path = str(MODELS_DIR / "lgbm_ranker.txt")
+        _W2V, _RANKER = load_models(w2v_path, lgbm_path)
+
+    if (
+        _STORE_META is None
+        or _PROD_CAT is None
+        or _POP_GLOBAL is None
+        or _POP_STORE is None
+        or _POP_REGION is None
+        or _POP_SUBCH is None
+    ):
+        (
+            _STORE_META,
+            _PROD_CAT,
+            _POP_GLOBAL,
+            _POP_STORE,
+            _POP_REGION,
+            _POP_SUBCH,
+        ) = build_lookup_dicts(
+            commerces_path=str(DATA_DIR / "commerces.parquet"),
+            products_path=str(DATA_DIR / "products_v2.parquet"),
+            pop_global_path=str(ARTIFACTS_DIR / "pop_global.parquet"),
+            pop_store_path=str(ARTIFACTS_DIR / "pop_store.parquet"),
+            pop_region_path=str(ARTIFACTS_DIR / "pop_region.parquet"),
+            pop_subch_path=str(ARTIFACTS_DIR / "pop_subch.parquet"),
+        )
+
+    if _PROD_NAME is None:
+        _PROD_NAME = {
+            _to_key(r["productid"]): _to_key(r["name"])
+            for r in pl.read_parquet(str(DATA_DIR / "products_v2.parquet"))
+            .select(["productid", "name"])
+            .iter_rows(named=True)
+        }
+
+    return (
+        _W2V,
+        _RANKER,
+        _STORE_META,
+        _PROD_CAT,
+        _POP_GLOBAL,
+        _POP_STORE,
+        _POP_REGION,
+        _POP_SUBCH,
+        _PROD_NAME,
+    )
 
 def _to_key(v) -> str:
     return str(v)
@@ -254,20 +322,20 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     """
     anchors_df must contains the colums "anchor_pid" and "userid".
     """
-    w2v_path = "models/word2vec.model"
-    lgbm_path = "models/lgbm_ranker.txt"
+    w2v_path = str(REPO_ROOT / "models" / "word2vec.model")
+    lgbm_path = str(REPO_ROOT / "models" / "lgbm_ranker.txt")
     topn = 20
     #anchors_df = anchors_df.drop("origin")
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
     store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch = build_lookup_dicts(
-        commerces_path="data/commerces.parquet",
-        products_path="data/products_v2.parquet",
-        pop_global_path="artifacts/pop_global.parquet",
-        pop_store_path="artifacts/pop_store.parquet",
-        pop_region_path="artifacts/pop_region.parquet",
-        pop_subch_path="artifacts/pop_subch.parquet",
+        commerces_path=str(REPO_ROOT / "data" / "commerces.parquet"),
+        products_path=str(REPO_ROOT / "data" / "products_v2.parquet"),
+        pop_global_path=str(REPO_ROOT / "artifacts" / "pop_global.parquet"),
+        pop_store_path=str(REPO_ROOT / "artifacts" / "pop_store.parquet"),
+        pop_region_path=str(REPO_ROOT / "artifacts" / "pop_region.parquet"),
+        pop_subch_path=str(REPO_ROOT / "artifacts" / "pop_subch.parquet"),
         #pop_origin_path="artifacts/pop_origin.parquet",
     )
 
@@ -395,26 +463,17 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
         })
 
 def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: bool = False) -> pl.DataFrame:
-    w2v_path = "models/word2vec.model"
-    lgbm_path = "models/lgbm_ranker.txt"
-    #origin = "ZHH1"
-
-    w2v, ranker = load_models(w2v_path, lgbm_path)
-
-    #store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin = build_lookup_dicts(
-    store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch = build_lookup_dicts(
-        commerces_path="data/commerces.parquet",
-        products_path="data/products_v2.parquet",
-        pop_global_path="artifacts/pop_global.parquet",
-        pop_store_path="artifacts/pop_store.parquet",
-        pop_region_path="artifacts/pop_region.parquet",
-        pop_subch_path="artifacts/pop_subch.parquet",
-        #pop_origin_path="artifacts/pop_origin.parquet",
-    )
-    prod_name = {
-        _to_key(r["productid"]): _to_key(r["name"])
-        for r in pl.read_parquet("data/products_v2.parquet").select(["productid", "name"]).iter_rows(named=True)
-    }
+    (
+        w2v,
+        ranker,
+        store_meta,
+        prod_cat,
+        pop_global,
+        pop_store,
+        pop_region,
+        pop_subch,
+        prod_name,
+    ) = get_runtime_objects()
 
     recs = recommend_candidates(
         anchor=anchor_id,
@@ -485,9 +544,8 @@ if __name__ == "__main__":
     results = getMultiRec(input_df.collect())
     print(results)
     """
-    """
-    print(getSingleRec("000295-999", "9077130ee9894b2d1e6d3341b341e006", topn=5, addDebugInfo = True))
+    
+    print(getSingleRec("000295-999", "9077130ee9894b2d1e6d3341b341e006", topn=8, addDebugInfo = False))
     
     data = {"anchor_pid": ["000295-003"], "userid": ["9077130ee9894b2d1e6d3341b341e006"]}
     print(getMultiRec(pl.DataFrame(data, schema={"anchor_pid": str, "userid": str})))
-    """
