@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+mangum
+pydantic
+python-dotenv
+numpy
+pandas
+polars
+lightgbm
+gensim
+tqdm
+pymongo

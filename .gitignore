@@ -212,3 +212,6 @@ data/*.parquet
 models
 artifacts
 tests/*.md
+
+# utils
+utils/*.csv
