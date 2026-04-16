@@ -9,6 +9,17 @@ from gensim.models import Word2Vec
 
 @step
 def build_baskets(df_path: str) -> str:
+    """Group order lines into per-order product baskets and save to Parquet.
+
+    Args:
+        df_path: Path to the orders Parquet file. Must contain columns
+            ``orderid`` and ``productid``.
+
+    Returns:
+        Path to the written baskets Parquet file (``data/baskets.parquet``).
+        Each row contains one ``orderid`` and the list of associated
+        ``productid`` values. Baskets with fewer than 2 items are dropped.
+    """
     df = pl.scan_parquet(df_path)
 
     baskets = (
@@ -22,7 +33,6 @@ def build_baskets(df_path: str) -> str:
         .collect()
     )
 
-    #print(baskets.head())
     baskets_path = "data/baskets.parquet"
     baskets.write_parquet(baskets_path)
     return baskets_path
@@ -53,6 +63,16 @@ def build_baskets_monthly(df_path: str) -> str:
 
 @step
 def data_split(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Split baskets into training and test sets using an 80 / 20 ratio.
+
+    Args:
+        baskets_path: Path to the baskets Parquet file produced by
+            :func:`build_baskets`.
+
+    Returns:
+        A tuple ``(train_df, test_df)`` where the first 80 % of rows form
+        the training set and the remaining 20 % form the test set.
+    """
     baskets = pl.read_parquet(baskets_path)
     split_idx = int(len(baskets) * 0.8)
     train_df = baskets[:split_idx]
@@ -67,6 +87,24 @@ def _shift_month(month_start: date, months: int) -> date:
 
 @step
 def data_split_monthly(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Split baskets into training and test sets by calendar month.
+
+    The two most recent months are held out as the test set; all earlier
+    months form the training set. Supports ``orderdt`` columns of type
+    ``pl.Date``, ``pl.Datetime``, or string (auto-parsed).
+
+    Args:
+        baskets_path: Path to the baskets Parquet file. Must contain an
+            ``orderdt`` column with parseable date values.
+
+    Returns:
+        A tuple ``(train_df, test_df)``. Both DataFrames have the
+        ``orderdt``.
+
+    Raises:
+        ValueError: If the ``orderdt`` column is missing or contains no
+            parseable dates.
+    """
     baskets = pl.read_parquet(baskets_path)
 
     if "orderdt" not in baskets.columns:
@@ -117,6 +155,19 @@ def data_split_monthly(baskets_path: str) -> tuple[pl.DataFrame, pl.DataFrame]:
 
 @step(enable_cache=False)
 def train_model(train_df_path: str) -> str:
+    """Train a Word2Vec skip-gram model on the provided training baskets.
+
+    Hyperparameters: ``vector_size=35``, ``window=100``, ``sg=1``,
+    ``min_count=2``, ``shrink_windows=False``. Workers are set to
+    ``cpu_count - 1`` (minimum 1).
+
+    Args:
+        train_df_path: Path to the training baskets Parquet file. Must
+            contain a ``productid`` column with lists of product ID strings.
+
+    Returns:
+        Path to the saved Word2Vec model (``models/word2vec.model``).
+    """
     train_df = pl.read_parquet(train_df_path)
     sentences = PolarsBasketIterator(train_df)
     model = Word2Vec(
@@ -174,6 +225,20 @@ def test_model(model: Word2Vec):
     print(retrieve_candidates(model, "000051-007"))
 
 def retrieve_candidates(model: Word2Vec, anchor_pid: str, topk: int = 5):
+    """Return the top-k most similar products for a given anchor product.
+
+    Uses cosine similarity in the Word2Vec embedding space.
+
+    Args:
+        model: A trained :class:`gensim.models.Word2Vec` model.
+        anchor_pid: Product ID to use as the query vector.
+        topk: Number of nearest neighbours to return. Defaults to ``5``.
+
+    Returns:
+        A list of ``(product_id, similarity_score)`` tuples ordered by
+        descending similarity. Returns an empty list if ``anchor_pid`` is
+        not in the model vocabulary.
+    """
     anchor_pid = str(anchor_pid)
     if anchor_pid not in model.wv:
         return []
