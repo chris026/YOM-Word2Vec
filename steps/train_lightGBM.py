@@ -28,14 +28,25 @@ def prepare_data(
     products_path: str,
     artifacts_dir: str = "artifacts",
 ) -> tuple[str, str, str, str, str]:
-    """
+    """Build product baskets and popularity tables from raw order data.
+
+    Creates one basket per order (list of product IDs) and four popularity
+    count tables: global, per store, per region, and per subchannel.
+    All outputs are written to Parquet files in ``artifacts_dir``.
+
+    Args:
+        data_path: Path to the orders Parquet file.
+        commerces_path: Path to the commerces Parquet file. Used to join
+            ``region`` and ``subchannel`` onto orders.
+        products_path: Path to the products Parquet file. Read to validate
+            the file exists and the schema is readable.
+        artifacts_dir: Output directory for artifact files.
+            Defaults to ``"artifacts"``.
+
     Returns:
-      baskets_path,
-      pop_global_path,
-      pop_store_path,
-      pop_origin_path,
-      pop_region_path,
-      pop_subch_path
+        A tuple of five Parquet file paths:
+        ``(baskets_path, pop_global_path, pop_store_path,
+        pop_region_path, pop_subch_path)``.
     """
 
     orders = pl.scan_parquet(data_path)
@@ -102,6 +113,25 @@ def generate_candidates_fast_to_parquet(
     w2v_model_path: str,
     artifacts_dir: str = "artifacts",
 ) -> str:
+    """Generate the full Word2Vec candidate set for every anchor product.
+
+    For each product in the Word2Vec vocabulary, retrieves all other
+    products ordered by cosine similarity (``topn = vocab_size``). The
+    resulting ``(anchor, candidate, sim_item2vec)`` pairs are joined with
+    the baskets so that every ``(orderid, anchor)`` combination gets its
+    candidate list.
+
+    Args:
+        baskets_path: Path to the baskets Parquet file produced by
+            :func:`prepare_data`.
+        w2v_model_path: Path to the trained Word2Vec model.
+        artifacts_dir: Output directory for artifact files.
+            Defaults to ``"artifacts"``.
+
+    Returns:
+        Path to the candidates Parquet file with columns
+        ``orderid``, ``anchor``, ``candidate``, ``sim_item2vec``.
+    """
     w2v_model = Word2Vec.load(w2v_model_path)
     wv = w2v_model.wv
     try:
@@ -160,6 +190,23 @@ def generate_negatives_to_parquet(
     topk: int,
     artifacts_dir: str = "artifacts",
 ) -> str:
+    """Generate a limited candidate set for negative sampling.
+
+    Similar to :func:`generate_candidates_fast_to_parquet` but restricts
+    retrieval to the top ``topk`` neighbours per anchor. The smaller set
+    is used as the negative pool in :func:`label_candidates`.
+
+    Args:
+        baskets_path: Path to the baskets Parquet file.
+        w2v_model_path: Path to the trained Word2Vec model.
+        topk: Number of nearest neighbours to retrieve per anchor product.
+        artifacts_dir: Output directory for artifact files.
+            Defaults to ``"artifacts"``.
+
+    Returns:
+        Path to the negatives Parquet file with columns
+        ``orderid``, ``anchor``, ``candidate``, ``sim_item2vec``.
+    """
     baskets_df = pl.read_parquet(baskets_path)
 
     w2v_model = Word2Vec.load(w2v_model_path)
@@ -207,12 +254,33 @@ def generate_negatives_to_parquet(
 
 
 @step
-def train1(
+def label_candidates(
     candidates_path: str,
     negatives_path: str,
     baskets_path: str,
     artifacts_dir: str = "artifacts",
 ) -> str:
+    """Assign relevance labels to candidates and negatives.
+
+    Marks every ``(orderid, candidate)`` pair that actually appears in the
+    basket as a positive (``label=1``). Negative examples are taken from
+    the negatives set, excluding any pair already present as a positive
+    (anti-join). The labelled dataset is the input for feature enrichment
+    in :func:`build_feature_matrix`.
+
+    Args:
+        candidates_path: Path to the full candidates Parquet file from
+            :func:`generate_candidates_fast_to_parquet`.
+        negatives_path: Path to the negatives Parquet file from
+            :func:`generate_negatives_to_parquet`.
+        baskets_path: Path to the baskets Parquet file.
+        artifacts_dir: Output directory for artifact files.
+            Defaults to ``"artifacts"``.
+
+    Returns:
+        Path to the labelled training Parquet file with columns
+        ``orderid``, ``anchor``, ``candidate``, ``sim_item2vec``, ``label``.
+    """
     candidates_lf = pl.scan_parquet(candidates_path)
     negative_lf = pl.scan_parquet(negatives_path)
     baskets_lf    = pl.scan_parquet(baskets_path)
@@ -270,7 +338,7 @@ def train1(
     return path
 
 @step
-def train2(
+def build_feature_matrix(
     baskets_path: str,
     commerces_path: str,
     products_path: str,
@@ -282,6 +350,32 @@ def train2(
     ranker_lf_path: str,
     artifacts_dir: str = "artifacts",
 ) -> tuple[str, str]:
+    """Enrich the labelled dataset with contextual features.
+
+    Joins store metadata (channel, commune, region, subchannel) and product
+    category onto each candidate row. Also attaches the four popularity
+    scores (global, store, region, subchannel). Computes LightGBM group
+    sizes (number of candidates per ``(orderid, anchor)`` pair) and saves
+    them as a NumPy array.
+
+    Args:
+        baskets_path: Path to the baskets Parquet file.
+        commerces_path: Path to the commerces Parquet file.
+        products_path: Path to the products Parquet file.
+        pop_global_path: Path to the global popularity Parquet file.
+        pop_store_path: Path to the per-store popularity Parquet file.
+        pop_region_path: Path to the per-region popularity Parquet file.
+        pop_subch_path: Path to the per-subchannel popularity Parquet file.
+        ranker_lf_path: Path to the labelled training Parquet file from
+            :func:`label_candidates`.
+        artifacts_dir: Output directory for artifact files.
+            Defaults to ``"artifacts"``.
+
+    Returns:
+        A tuple ``(train_parquet_path, groups_npy_path)`` where
+        ``train_parquet_path`` is the enriched training Parquet file and
+        ``groups_npy_path`` is the NumPy file with group sizes for LightGBM.
+    """
     baskets_lf    = pl.scan_parquet(baskets_path)
     commerces_lf  = pl.scan_parquet(commerces_path)
     products_lf   = pl.scan_parquet(products_path)
@@ -387,6 +481,26 @@ def train_ranker_from_files(
     train_parquet_path: str,
     groups_npy_path: str,
 ) -> str:
+    """Train a LightGBM LambdaRank model from the prepared training data.
+
+    Loads the enriched feature matrix, encodes categorical columns, and
+    fits an :class:`lgb.LGBMRanker` with ``objective="lambdarank"`` and
+    ``metric="ndcg"``. The trained booster is saved as a plain-text model
+    file.
+
+    Features used: ``sim_item2vec``, ``pop_global``, ``pop_subch``,
+    ``pop_region``, ``pop_store``, ``channel``, ``commune``,
+    ``cand_category``, ``region``, ``subchannel``.
+
+    Args:
+        train_parquet_path: Path to the enriched training Parquet file
+            produced by :func:`build_feature_matrix`.
+        groups_npy_path: Path to the NumPy ``.npy`` file with group sizes
+            (number of candidates per query) produced by :func:`build_feature_matrix`.
+
+    Returns:
+        Path to the saved LightGBM model (``models/lgbm_ranker.txt``).
+    """
     feature_cols = [
         "sim_item2vec",
         "pop_global",
@@ -469,6 +583,25 @@ def ranker_training_pipeline_fast(
     artifacts_dir: str = "artifacts",
     topk: int = 10,
 ) -> str:
+    """Orchestrate the full LightGBM ranker training pipeline.
+
+    Runs all sub-steps in order: data preparation, candidate generation,
+    negative sampling, label assignment, feature enrichment, and ranker
+    training.
+
+    Args:
+        orders_path: Path to the orders Parquet file.
+        commerces_path: Path to the commerces (store metadata) Parquet file.
+        products_path: Path to the products Parquet file.
+        w2v_path: Path to the trained Word2Vec model.
+        artifacts_dir: Directory for intermediate Parquet and NumPy
+            artifacts. Defaults to ``"artifacts"``.
+        topk: Number of Word2Vec neighbours used for negative sampling.
+            Defaults to ``10``.
+
+    Returns:
+        Path to the trained LightGBM ranker model (``models/lgbm_ranker.txt``).
+    """
     (
         baskets_path,
         pop_global_path,
@@ -496,14 +629,14 @@ def ranker_training_pipeline_fast(
         artifacts_dir=artifacts_dir,
     )
 
-    train1_path = train1(
+    label_candidates_path = label_candidates(
         candidates_path=candidates_path,
         negatives_path=negatives_path,
         baskets_path=baskets_path,
         artifacts_dir=artifacts_dir,
     )
 
-    train_path, groups_path = train2(
+    train_path, groups_path = build_feature_matrix(
         baskets_path=baskets_path,
         commerces_path=commerces_path,
         products_path=products_path,
@@ -512,7 +645,7 @@ def ranker_training_pipeline_fast(
         #pop_origin_path=pop_origin_path,
         pop_region_path=pop_region_path,
         pop_subch_path=pop_subch_path,
-        ranker_lf_path = train1_path,
+        ranker_lf_path = label_candidates_path,
         artifacts_dir=artifacts_dir,
     )
 

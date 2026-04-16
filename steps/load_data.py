@@ -36,6 +36,15 @@ def _read_orders_csv_permissive(path: str) -> pl.LazyFrame:
 
 @step
 def load_data() -> str:
+    """Load the short orders CSV and convert it to Parquet.
+
+    Reads ``data/2024-20250001_part_00-001_short.csv``, drops rows with
+    null or empty ``orderid`` / ``productid``, and writes the result to
+    ``data/2024-20250001_part_00-001_short.parquet``.
+
+    Returns:
+        Path to the written Parquet file.
+    """
     source_path = "data/2024-20250001_part_00-001_short.csv"
     target_path = "data/2024-20250001_part_00-001_short.parquet"
     products = _read_orders_csv_permissive(source_path)
@@ -60,12 +69,28 @@ def load_data_testTrain_seperated() -> tuple[str, str]:
 
 @step
 def load_products() -> str:
+    """Load the products CSV and convert it to Parquet.
+
+    Reads ``data/products_v2.csv`` (semicolon-separated) and writes it
+    to ``data/products_v2.parquet``.
+
+    Returns:
+        Path to the written Parquet file (``data/products_v2.parquet``).
+    """
     products = pl.read_csv("data/products_v2.csv", separator=";")
     products.write_parquet("data/products_v2.parquet")
     return "data/products_v2.parquet"
 
 @step
 def load_commerces() -> str:
+    """Load the commerces (store metadata) CSV and convert it to Parquet.
+
+    Reads ``data/commerces.csv`` (semicolon-separated) and writes it
+    to ``data/commerces.parquet``.
+
+    Returns:
+        Path to the written Parquet file (``data/commerces.parquet``).
+    """
     commerces = pl.read_csv("data/commerces.csv", separator=";")
     commerces.write_parquet("data/commerces.parquet")
     return "data/commerces.parquet"
@@ -78,6 +103,19 @@ def save_train_test_split(
     train_path: str = "data/train_df.parquet",
     test_path: str = "data/test_df.parquet",
 ) -> tuple[str, str]:
+    """Persist train and test DataFrames to Parquet files.
+
+    Args:
+        train_df: Training split DataFrame.
+        test_df: Test split DataFrame.
+        train_path: Output path for the training Parquet file.
+            Defaults to ``"data/train_df.parquet"``.
+        test_path: Output path for the test Parquet file.
+            Defaults to ``"data/test_df.parquet"``.
+
+    Returns:
+        A tuple ``(train_path, test_path)`` with the written file paths.
+    """
     train_df.write_parquet(train_path)
     test_df.write_parquet(test_path)
     return train_path, test_path
@@ -89,6 +127,21 @@ def save_df(df: pl.DataFrame, path: str) -> str:
 
 @step
 def clean_blocked_products(orders_path: str, products_path: str) -> tuple[str, str]:
+    """Remove blocked products and their associated orders in place.
+
+    Filters out all rows where ``blocked=True`` from the products file,
+    then removes every order row whose ``productid`` no longer appears in
+    the cleaned products. Both files are overwritten atomically via a
+    temporary file.
+
+    Args:
+        orders_path: Path to the orders Parquet file. Overwritten in place.
+        products_path: Path to the products Parquet file. Overwritten in place.
+
+    Returns:
+        A tuple ``(orders_path, products_path)`` — the same paths that
+        were passed in, now pointing to the cleaned files.
+    """
     products_tmp = products_path + ".tmp"
     orders_tmp = orders_path + ".tmp"
 

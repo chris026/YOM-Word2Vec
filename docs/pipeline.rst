@@ -101,9 +101,9 @@ a trained LightGBM model (``LambdaRank`` objective) saved to
 
 .. autofunction:: steps.train_lightGBM.generate_negatives_to_parquet
 
-.. autofunction:: steps.train_lightGBM.train1
+.. autofunction:: steps.train_lightGBM.label_candidates
 
-.. autofunction:: steps.train_lightGBM.train2
+.. autofunction:: steps.train_lightGBM.build_feature_matrix
 
 .. autofunction:: steps.train_lightGBM.train_ranker_from_files
 
