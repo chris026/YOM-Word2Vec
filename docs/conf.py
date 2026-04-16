@@ -22,6 +22,19 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
+autodoc_mock_imports = [
+    "zenml",
+    "polars",
+    "gensim",
+    "numpy",
+    "matplotlib",
+    "sklearn",
+    "lightgbm",
+    "pandas",
+    "pyarrow",
+    "tqdm",
+]
+
 # -- Options for HTML output -------------------------------------------------
 
 html_theme = "sphinx_rtd_theme"
