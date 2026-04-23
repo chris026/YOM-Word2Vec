@@ -9,6 +9,7 @@ A product recommendation system using Word2Vec for candidate retrieval and Light
 
    pipeline
    api
+   design
 
 Pipeline
 --------
