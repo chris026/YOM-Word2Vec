@@ -12,8 +12,18 @@ from zenml import step, pipeline
 # ==============================
 
 def _artifact_path(base_dir: str, name: str, ext: str) -> str:
+    """Return a file path inside ``base_dir``, creating the directory if needed.
+
+    Args:
+        base_dir: Directory in which the artifact file will be stored.
+            Created with ``os.makedirs(..., exist_ok=True)`` if absent.
+        name: Base name of the artifact file (without extension).
+        ext: File extension without leading dot (e.g. ``"parquet"``, ``"npy"``).
+
+    Returns:
+        The full file path ``<base_dir>/<name>.<ext>``.
+    """
     os.makedirs(base_dir, exist_ok=True)
-    #return os.path.join(base_dir, f"{name}_{uuid.uuid4().hex}.{ext}")
     return os.path.join(base_dir, f"{name}.{ext}")
 
 
@@ -60,7 +70,6 @@ def prepare_data(
         .agg(
             pl.col("productid").alias("basket"),
             pl.first("userid").alias("userid"),
-            #pl.first("origin").alias("origin"),
         )
     )
     baskets_path = _artifact_path(artifacts_dir, "baskets", "parquet")
@@ -69,7 +78,6 @@ def prepare_data(
     # --- popularity tables ---
     pop_global_lf = orders.group_by("productid").agg(pl.len().alias("pop_global"))
     pop_store_lf = orders.group_by(["userid", "productid"]).agg(pl.len().alias("pop_store"))
-    #pop_origin_lf = orders.group_by(["origin", "productid"]).agg(pl.len().alias("pop_origin"))
 
     # For region/subchannel, join orders with commerces first
     orders_enriched = orders.join(
@@ -83,13 +91,11 @@ def prepare_data(
 
     pop_global_path = _artifact_path(artifacts_dir, "pop_global", "parquet")
     pop_store_path = _artifact_path(artifacts_dir, "pop_store", "parquet")
-    #pop_origin_path = _artifact_path(artifacts_dir, "pop_origin", "parquet")
     pop_region_path = _artifact_path(artifacts_dir, "pop_region", "parquet")
     pop_subch_path = _artifact_path(artifacts_dir, "pop_subch", "parquet")
 
     pop_global_lf.collect().write_parquet(pop_global_path)
     pop_store_lf.collect().write_parquet(pop_store_path)
-    #pop_origin_lf.collect().write_parquet(pop_origin_path)
     pop_region_lf.collect().write_parquet(pop_region_path)
     pop_subch_lf.collect().write_parquet(pop_subch_path)
 
@@ -344,7 +350,6 @@ def build_feature_matrix(
     products_path: str,
     pop_global_path: str,
     pop_store_path: str,
-    #pop_origin_path: str,
     pop_region_path: str,
     pop_subch_path: str,
     ranker_lf_path: str,
@@ -404,7 +409,6 @@ def build_feature_matrix(
     # Popularity joins
     pop_global_lf = pl.scan_parquet(pop_global_path)
     pop_store_lf  = pl.scan_parquet(pop_store_path)
-    #pop_origin_lf = pl.scan_parquet(pop_origin_path)
     pop_region_lf = pl.scan_parquet(pop_region_path)
     pop_subch_lf  = pl.scan_parquet(pop_subch_path)
     
@@ -412,13 +416,11 @@ def build_feature_matrix(
         ranker_lf
         .join(pop_global_lf, left_on="candidate", right_on="productid", how="left")
         .join(pop_store_lf, left_on=["userid", "candidate"], right_on=["userid", "productid"], how="left")
-        #.join(pop_origin_lf, left_on=["origin", "candidate"], right_on=["origin", "productid"], how="left")
         .join(pop_region_lf, left_on=["region", "candidate"], right_on=["region", "productid"], how="left")
         .join(pop_subch_lf, left_on=["subchannel", "candidate"], right_on=["subchannel", "productid"], how="left")
         .with_columns(
             pl.col("pop_global").fill_null(0),
             pl.col("pop_store").fill_null(0),
-            #pl.col("pop_origin").fill_null(0),
             pl.col("pop_region").fill_null(0),
             pl.col("pop_subch").fill_null(0),
         )
@@ -427,7 +429,6 @@ def build_feature_matrix(
     ranker_lf = ranker_lf.with_columns(
         pl.col("channel").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("commune").fill_null("UNKNOWN").cast(pl.Utf8),
-        #pl.col("origin").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("region").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("subchannel").fill_null("UNKNOWN").cast(pl.Utf8),
         pl.col("category").fill_null("UNKNOWN").cast(pl.Utf8).alias("cand_category"),
@@ -437,13 +438,11 @@ def build_feature_matrix(
         "sim_item2vec",
         "pop_global",
         "pop_subch",
-        #"pop_origin",
         "pop_region",
         "channel",
         "pop_store",
         "commune",
         "cand_category",
-        #"origin",
         "region",
         "subchannel",
         "label",
@@ -505,13 +504,11 @@ def train_ranker_from_files(
         "sim_item2vec",
         "pop_global",
         "pop_subch",
-        #"pop_origin",
         "pop_region",
         "channel",
         "pop_store",
         "commune",
         "cand_category",
-        #"origin",
         "region",
         "subchannel",
     ]
@@ -519,7 +516,6 @@ def train_ranker_from_files(
         "channel",
         "commune",
         "cand_category",
-        #"origin",
         "region",
         "subchannel",
     ]

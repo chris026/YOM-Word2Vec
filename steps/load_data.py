@@ -3,6 +3,22 @@ import polars as pl
 import os
 
 def _read_orders_csv_permissive(path: str) -> pl.LazyFrame:
+    """Read an orders CSV lazily and apply minimal cleaning.
+
+    Enforces a fixed schema across all 16 known columns so that
+    unexpected values do not raise a parse error (hence "permissive").
+    Rows with a null or empty ``orderid`` or ``productid`` are dropped,
+    and columns irrelevant to Word2Vec training (``documentcode``,
+    ``tax``, ``currency``, ``discountperunit``, ``couponcode``) are
+    removed.
+
+    Args:
+        path: File path to the source CSV.
+
+    Returns:
+        A lazy frame that has not yet been materialised — call
+        ``.collect()`` or ``.sink_parquet()`` to evaluate it.
+    """
     drop_items = ("documentcode", "tax", "currency", "discountperunit", "couponcode")
 
     schema = {
@@ -54,6 +70,16 @@ def load_data() -> str:
 
 @step
 def load_data_testTrain_seperated() -> tuple[str, str]:
+    """Load pre-split train and test order CSVs and convert them to Parquet.
+
+    Reads ``data/train_df_1m.csv`` and ``data/test_df_1m.csv``, drops
+    rows with null or empty ``orderid`` / ``productid``, and writes the
+    results to ``data/train_df_1m.parquet`` and ``data/test_df_1m.parquet``.
+
+    Returns:
+        A tuple ``(train_path, test_path)`` with the paths to the written
+        Parquet files.
+    """
     source_path_train = "data/train_df_1m.csv"
     target_path_train = "data/train_df_1m.parquet"
     source_path_test = "data/test_df_1m.csv"
@@ -122,6 +148,16 @@ def save_train_test_split(
 
 @step
 def save_df(df: pl.DataFrame, path: str) -> str:
+    """Persist a DataFrame to a Parquet file.
+
+    Args:
+        df: DataFrame to write.
+        path: Output file path for the Parquet file.
+
+    Returns:
+        The same ``path`` that was passed in.
+    """
+
     df.write_parquet(path)
     return path
 

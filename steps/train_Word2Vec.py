@@ -39,6 +39,23 @@ def build_baskets(df_path: str) -> str:
 
 @step
 def build_baskets_monthly(df_path: str) -> str:
+    """Group order lines into per-order product baskets, retaining the order date.
+
+    Like :func:`build_baskets`, but also preserves the ``orderdt`` column
+    so that downstream steps can perform time-based splits. Rows with a
+    null ``orderid``, ``productid``, or ``orderdt`` are dropped. Baskets
+    with fewer than 2 items are removed.
+
+    Args:
+        df_path: Path to the orders Parquet file. Must contain columns
+            ``orderid``, ``productid``, and ``orderdt``.
+
+    Returns:
+        Path to the written baskets Parquet file (``data/baskets.parquet``).
+        Each row contains one ``orderid``, the list of associated
+        ``productid`` values, and the first ``orderdt`` of that order.
+    """
+
     df = pl.scan_parquet(df_path)
 
     baskets = (
