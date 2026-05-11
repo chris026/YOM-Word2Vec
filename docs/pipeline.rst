@@ -41,7 +41,36 @@ Raw order and product data is read from CSV files and converted to Parquet for
 efficient downstream processing. Blocked products (``blocked=True``) are removed
 before any modelling step, together with the corresponding order rows.
 
+**Choosing a data loading strategy**
+
+The pipeline supports two loading strategies, selected via ``MULTI_MONTH_MODE``
+in ``run.py``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
+
+   * - ``MULTI_MONTH_MODE``
+     - Function
+     - When to use
+   * - ``False``
+     - ``load_data()``
+     - A single CSV covers only a few months of orders. All data is loaded
+       together; the train/test split is applied afterwards.
+   * - ``True``
+     - ``load_data_testTrain_seperated()``
+     - The data spans several months and has been split into separate train
+       and test CSV files (``train_df_1m.csv``, ``test_df_1m.csv``) in
+       advance. Both files are loaded and converted to Parquet independently.
+
+When ``MULTI_MONTH_MODE = True``, ``clean_blocked_products`` is applied to
+**both** the train and the test path. Forgetting to clean the test data is a
+common mistake when switching modes manually — the flag handles this
+automatically.
+
 .. autofunction:: steps.load_data.load_data
+
+.. autofunction:: steps.load_data.load_data_testTrain_seperated
 
 .. autofunction:: steps.load_data.load_products
 
@@ -59,15 +88,25 @@ Orders are grouped by ``orderid`` to create baskets — lists of products that w
 purchased together. Baskets with fewer than two items are discarded because
 Word2Vec requires at least two tokens per sequence.
 
-Two split strategies are available: a simple random 80 / 20 split and a
-time-based split where the last two calendar months are held out for testing.
+Two split strategies are available, selected via ``MULTI_MONTH_MODE`` in
+``run.py``:
 
-**Why 80 / 20?**
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
 
-The 80 / 20 ratio is the standard baseline for this dataset size. The
-time-based alternative (``data_split_monthly``) is available when evaluating
-model behaviour on the most recent purchase patterns is more important than
-maximising training data volume.
+   * - ``MULTI_MONTH_MODE``
+     - Function
+     - When to use
+   * - ``False``
+     - ``data_split()``
+     - Few months of data. Splits baskets randomly 80 / 20. Maximises
+       training volume; does not require an ``orderdt`` column.
+   * - ``True``
+     - ``data_split_monthly()``
+     - Several months of data. Holds out the last two calendar months as
+       the test set. Evaluates the model on the most recent purchase
+       patterns. Requires an ``orderdt`` column in the baskets.
 
 .. autofunction:: steps.train_Word2Vec.build_baskets
 

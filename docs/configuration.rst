@@ -77,8 +77,10 @@ Configured in ``steps/train_Word2Vec.py`` and ``steps/train_lightGBM.py``.
      - Value
      - Purpose
    * - Train / test split
-     - ``80 / 20``
-     - Fraction of baskets used for training vs. evaluation.
+     - ``80 / 20`` or last 2 calendar months
+     - Controlled by ``MULTI_MONTH_MODE`` in ``run.py``. ``False`` → random
+       80 / 20 split (``data_split``). ``True`` → time-based split
+       (``data_split_monthly``), holding out the two most recent months.
    * - Minimum basket size
      - ``2``
      - Baskets with fewer than 2 items are discarded before Word2Vec training.
