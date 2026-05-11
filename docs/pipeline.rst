@@ -41,32 +41,24 @@ Raw order and product data is read from CSV files and converted to Parquet for
 efficient downstream processing. Blocked products (``blocked=True``) are removed
 before any modelling step, together with the corresponding order rows.
 
-**Choosing a data loading strategy**
-
-The pipeline supports two loading strategies, selected via ``MULTI_MONTH_MODE``
-in ``run.py``:
+Two loading functions are available depending on how much data is being processed:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 25 35 40
 
-   * - ``MULTI_MONTH_MODE``
-     - Function
-     - When to use
-   * - ``False``
+   * - Modus
+     - Funktion
+     - Wann verwenden
+   * - Standard
      - ``load_data()``
-     - A single CSV covers only a few months of orders. All data is loaded
-       together; the train/test split is applied afterwards.
-   * - ``True``
+     - Wenige Monate Daten in einer einzigen CSV-Datei
+       (``data/2024-20250001_part_00-001_short.csv``).
+   * - Multi-Month
      - ``load_data_testTrain_seperated()``
-     - The data spans several months and has been split into separate train
-       and test CSV files (``train_df_1m.csv``, ``test_df_1m.csv``) in
-       advance. Both files are loaded and converted to Parquet independently.
-
-When ``MULTI_MONTH_MODE = True``, ``clean_blocked_products`` is applied to
-**both** the train and the test path. Forgetting to clean the test data is a
-common mistake when switching modes manually — the flag handles this
-automatically.
+     - Mehrere Monate Daten, die bereits extern aufgeteilt wurden.
+       Erwartet ``data/train_df_1m.csv`` und ``data/test_df_1m.csv``
+       und gibt beide Pfade zurück.
 
 .. autofunction:: steps.load_data.load_data
 
@@ -88,27 +80,45 @@ Orders are grouped by ``orderid`` to create baskets — lists of products that w
 purchased together. Baskets with fewer than two items are discarded because
 Word2Vec requires at least two tokens per sequence.
 
-Two split strategies are available, selected via ``MULTI_MONTH_MODE`` in
-``run.py``:
+Two strategies are available depending on the volume and time span of the data.
+The active variant is selected by commenting or uncommenting the relevant lines
+in ``run.py`` — there is no single flag variable:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 20 40 40
 
-   * - ``MULTI_MONTH_MODE``
-     - Function
-     - When to use
-   * - ``False``
+   * - Schritt
+     - Standard-Modus (wenige Monate)
+     - Multi-Month-Modus (mehrere Monate)
+   * - Basket-Building
+     - ``build_baskets()``
+       Nur ``orderid`` und ``productid`` werden behalten.
+     - ``build_baskets_monthly()``
+       Bewahrt zusätzlich ``orderdt`` — zwingend erforderlich
+       für den zeitbasierten Split.
+   * - Train/Test-Split
      - ``data_split()``
-     - Few months of data. Splits baskets randomly 80 / 20. Maximises
-       training volume; does not require an ``orderdt`` column.
-   * - ``True``
+       Zufälliger 80 / 20-Split. Benötigt keine Datumsspalte.
+       Maximiert das Trainingsvolumen.
      - ``data_split_monthly()``
-     - Several months of data. Holds out the last two calendar months as
-       the test set. Evaluates the model on the most recent purchase
-       patterns. Requires an ``orderdt`` column in the baskets.
+       Hält die letzten zwei Kalendermonate als Testset zurück.
+       Evaluiert das Modell auf den aktuellsten Kaufmustern.
+       Erfordert die ``orderdt``-Spalte aus ``build_baskets_monthly``.
+
+.. note::
+
+   Im Multi-Month-Modus muss **zwingend** ``build_baskets_monthly`` statt
+   ``build_baskets`` verwendet werden, da ``data_split_monthly`` die
+   ``orderdt``-Spalte für den zeitbasierten Split benötigt. Außerdem sollte
+   ``clean_blocked_products`` auch auf den Testdaten-Pfad angewendet werden
+   (die entsprechende Zeile ist in ``run.py`` auskommentiert), und der
+   ``test_model``-Schritt am Ende des Skripts sollte aktiviert werden, um
+   eine zeitlich valide Evaluation zu erhalten.
 
 .. autofunction:: steps.train_Word2Vec.build_baskets
+
+.. autofunction:: steps.train_Word2Vec.build_baskets_monthly
 
 .. autofunction:: steps.train_Word2Vec.data_split
 

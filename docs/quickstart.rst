@@ -35,6 +35,62 @@ Setup
    # source venv/bin/activate     # macOS / Linux
    pip install -r requirements.txt
 
+Pipeline-Modus wählen
+---------------------
+
+Bevor du ``run.py`` ausführst, entscheide welcher Modus zu deinem Datensatz passt.
+Der Modus wird durch Kommentieren bzw. Auskommentieren einzelner Zeilen in
+``run.py`` gewählt — es gibt keine einzelne Konfigurationsvariable.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Kriterium
+     - Standard-Modus
+     - Multi-Month-Modus
+   * - Datenmenge
+     - Wenige Monate in einer CSV-Datei
+     - Mehrere Monate, extern vorgesplittet
+   * - Datei laden
+     - ``load_data()``
+     - ``load_data_testTrain_seperated()``
+   * - Basket-Building
+     - ``build_baskets()``
+     - ``build_baskets_monthly()`` *(bewahrt ``orderdt``)*
+   * - Train/Test-Split
+     - ``data_split()`` — zufällig 80 / 20
+     - ``data_split_monthly()`` — letzte 2 Monate als Test
+
+**Standard-Modus (aktiv per Default):** Keine Änderungen an ``run.py`` nötig.
+
+**Multi-Month-Modus:** Folgende Zeilen in ``run.py`` anpassen:
+
+.. code-block:: python
+
+   # Daten laden — Zeile aktivieren, load_data() auskommentieren:
+   data_path_train, data_path_test = load_data_testTrain_seperated()
+   # data_path_train = load_data()
+
+   # Baskets mit Datum bauen (statt build_baskets):
+   train_df_path = word2vec_model.build_baskets_monthly(data_path_train)
+
+   # Zeitbasierten Split aktivieren:
+   train_df, test_df = word2vec_model.data_split_monthly(baskets_path)
+   train_df_path, test_df_path = save_train_test_split(train_df, test_df)
+
+   # clean_blocked_products auch auf Testdaten anwenden:
+   data_path_test, _ = clean_blocked_products(data_path_test, products_path)
+
+   # Evaluation am Ende aktivieren:
+   metrics = test_model(test_df_path, W2Vmodel_path, LGM_model_path)
+
+.. note::
+
+   ``build_baskets_monthly`` ist im Multi-Month-Modus zwingend erforderlich,
+   da ``data_split_monthly`` die ``orderdt``-Spalte benötigt, die nur diese
+   Funktion bewahrt.
+
 Step 1 — Training
 -----------------
 
