@@ -35,11 +35,11 @@ Setup
    # source venv/bin/activate     # macOS / Linux
    pip install -r requirements.txt
 
-Pipeline-Modus wählen
----------------------
+Choosing a pipeline
+-------------------
 
-``run.py`` enthält vier Pipelines. Immer nur eine ist aktiv; die anderen sind
-auskommentiert. Den gewünschten Block auskommentieren und den Rest aktivieren.
+``run.py`` contains four pipelines. Only one is active at a time; the others are
+commented out. Uncomment the desired block and comment out the rest.
 
 .. list-table::
    :header-rows: 1
@@ -47,59 +47,60 @@ auskommentiert. Den gewünschten Block auskommentieren und den Rest aktivieren.
 
    * - #
      - Name
-     - Wann verwenden
+     - When to use
      - Split
    * - 1
-     - **Kein Split** *(aktiv per Default)*
-     - Exploration, kleine Datasets oder wenn kein Testset benötigt wird.
-       Trainiert auf allen Daten.
-     - keiner
+     - **No split** *(active by default)*
+     - Exploration, small datasets, or when no test set is needed.
+       Trains on all available data.
+     - none
    * - 2
-     - **Externer Split**
-     - Daten kommen extern vorgesplittet als zwei separate CSV-Dateien
+     - **External split**
+     - Data arrives pre-split as two separate CSV files
        (``train_df_1m.csv`` / ``test_df_1m.csv``).
-     - extern (zwei CSVs)
+     - external (two CSVs)
    * - 3
-     - **80/20-Zufallssplit**
-     - Einzelne CSV-Datei; zufällige Train/Test-Aufteilung in Python.
-       Maximiert das Trainingsvolumen.
-     - ``data_split()`` — zufällig 80 / 20
+     - **80/20 random split**
+     - Single CSV file; random train/test split in Python.
+       Maximises training volume.
+     - ``data_split()`` — random 80 / 20
    * - 4
-     - **Monatlicher Split**
-     - Einzelne CSV-Datei; zeitlich valide Evaluation. Die letzten zwei
-       Kalendermonate werden als Testset zurückgehalten.
-     - ``data_split_monthly()`` — letzte 2 Monate
+     - **Monthly split**
+     - Single CSV file; temporally valid evaluation. The last two
+       calendar months are held out as the test set.
+     - ``data_split_monthly()`` — last 2 months
 
-**Pipeline 1 — Kein Split (aktiv per Default):** Keine Änderungen an ``run.py`` nötig.
+**Pipeline 1 — No split (active by default):** No changes to ``run.py`` needed.
 
-**Pipeline 2 — Externer Split:** Den Block ab ``load_data_testTrain_seperated()``
-einkommentieren und den Pipeline-1-Block auskommentieren:
+**Pipeline 2 — External split:** Uncomment the block starting at
+``load_data_testTrain_seperated()`` and comment out the pipeline 1 block:
 
 .. code-block:: python
 
-   # Pipeline 2 aktivieren:
+   # Activate pipeline 2:
    data_path_train, data_path_test = load_data_testTrain_seperated()
    # ...
    data_path_test, _ = clean_blocked_products(data_path_test, products_path)
    train_df_path = word2vec_model.build_baskets(data_path_train)
 
-**Pipeline 3 — 80/20-Zufallssplit:** Den Block ab ``data_split()`` einkommentieren:
+**Pipeline 3 — 80/20 random split:** Uncomment the block starting at ``data_split()``:
 
 .. code-block:: python
 
-   # Pipeline 3 aktivieren:
+   # Activate pipeline 3:
    data_path_train = load_data()
    train_df, test_df = word2vec_model.data_split(data_path_train)
    data_path_train, data_path_test = save_train_test_split(train_df, test_df)
    # ...
    train_df_path = word2vec_model.build_baskets(data_path_train)
 
-**Pipeline 4 — Monatlicher Split:** Den Block ab ``data_split_monthly()``
-einkommentieren. Der Split erfolgt auf den Rohdaten *vor* dem Basket-Building:
+**Pipeline 4 — Monthly split:** Uncomment the block starting at
+``data_split_monthly()``. The split is applied to the raw order data *before*
+basket building:
 
 .. code-block:: python
 
-   # Pipeline 4 aktivieren:
+   # Activate pipeline 4:
    data_path_train = load_data()
    data_path_train, products_path = clean_blocked_products(data_path_train, products_path)
    train_df, test_df = word2vec_model.data_split_monthly(data_path_train)
@@ -113,9 +114,7 @@ Step 1 — Training
 
    python run.py
 
-The pipeline executes seven steps in order (load → clean → baskets → split →
-Word2Vec → LightGBM → evaluate). Step-level caching via ZenML means unchanged
-steps are skipped on subsequent runs.
+Step-level caching via ZenML means unchanged steps are skipped on subsequent runs.
 
 Main outputs:
 

@@ -22,8 +22,8 @@ The following steps are executed in order:
      - Load orders, products, and commerces from CSV into Parquet
    * - ``clean_blocked_products``
      - Remove products flagged as blocked and the associated orders
-   * - ``data_split`` / ``data_split_monthly`` *(pipeline-abhängig)*
-     - Split orders into train and test sets — nur in Pipeline 3 und 4
+   * - ``data_split`` / ``data_split_monthly`` *(pipeline-dependent)*
+     - Split orders into train and test sets — only in pipelines 3 and 4
    * - ``build_baskets``
      - Group order lines into per-order product baskets (min. 2 items)
    * - ``train_model``
@@ -39,23 +39,23 @@ Raw order and product data is read from CSV files and converted to Parquet for
 efficient downstream processing. Blocked products (``blocked=True``) are removed
 before any modelling step, together with the corresponding order rows.
 
-Zwei Ladefunktionen stehen zur Verfügung — die Wahl hängt von der aktiven Pipeline ab:
+Two loading functions are available — the choice depends on the active pipeline:
 
 .. list-table::
    :header-rows: 1
    :widths: 25 35 40
 
    * - Pipeline
-     - Funktion
-     - Wann verwenden
+     - Function
+     - When to use
    * - 1, 3, 4
      - ``load_data()``
-     - Einzelne CSV-Datei mit allen Bestellungen.
+     - Single CSV file containing all orders.
    * - 2
      - ``load_data_testTrain_seperated()``
-     - Daten kommen extern vorgesplittet als zwei separate Dateien.
-       Erwartet ``data/train_df_1m.csv`` und ``data/test_df_1m.csv``
-       und gibt beide Pfade zurück.
+     - Data arrives pre-split as two separate files.
+       Expects ``data/train_df_1m.csv`` and ``data/test_df_1m.csv``
+       and returns both paths.
 
 .. autofunction:: steps.load_data.load_data
 
@@ -77,10 +77,9 @@ Orders are grouped by ``orderid`` to create baskets — lists of products that w
 purchased together. Baskets with fewer than two items are discarded because
 Word2Vec requires at least two tokens per sequence.
 
-``run.py`` enthält vier Pipelines, die sich darin unterscheiden, wie und ob die
-Daten gesplittet werden. Die aktive Pipeline wird durch Kommentieren bzw.
-Auskommentieren der jeweiligen Zeilen in ``run.py`` gewählt — es gibt keine
-einzelne Konfigurationsvariable.
+``run.py`` contains four pipelines that differ in how — and whether — the data
+is split. The active pipeline is selected by commenting or uncommenting the
+relevant lines in ``run.py`` — there is no single flag variable.
 
 .. list-table::
    :header-rows: 1
@@ -88,35 +87,35 @@ einzelne Konfigurationsvariable.
 
    * - #
      - Name
-     - Split-Funktion
-     - Zeitpunkt des Splits
-     - Basket-Funktion
+     - Split function
+     - When the split happens
+     - Basket function
    * - 1
-     - Kein Split *(Default)*
+     - No split *(default)*
      - —
      - —
      - ``build_baskets()``
    * - 2
-     - Externer Split
-     - extern (zwei CSVs)
-     - vor dem Pipeline-Start
+     - External split
+     - external (two CSVs)
+     - before the pipeline starts
      - ``build_baskets()``
    * - 3
-     - 80/20-Zufallssplit
+     - 80/20 random split
      - ``data_split()``
-     - nach ``clean_blocked_products``
+     - **before** ``clean_blocked_products``
      - ``build_baskets()``
    * - 4
-     - Monatlicher Split
+     - Monthly split
      - ``data_split_monthly()``
-     - nach ``clean_blocked_products``, **vor** ``build_baskets``
+     - after ``clean_blocked_products``, **before** ``build_baskets``
      - ``build_baskets()``
 
 .. note::
 
-   In Pipeline 4 erfolgt der monatliche Split auf den Rohdaten (Bestellzeilen),
-   bevor Baskets gebaut werden. Die letzten zwei Kalendermonate werden als
-   Testset zurückgehalten. Alle vier Pipelines verwenden ``build_baskets()``.
+   In pipeline 4 the monthly split is applied to the raw order rows before
+   baskets are built. The last two calendar months are held out as the test set.
+   All four pipelines use ``build_baskets()``.
 
 .. autofunction:: steps.train_Word2Vec.build_baskets
 
@@ -204,4 +203,5 @@ last item is treated as the positive label; the remaining items serve as the
 anchor set. The evaluation computes Precision\@k, Recall\@k, F1\@k, and
 NDCG\@k for the Word2Vec baseline, the LightGBM ranker, and a blended score.
 
-.. autofunction:: steps.test_model.test_model
+Evaluation runs outside the ZenML pipeline via standalone scripts in ``tests/``.
+See :doc:`testing` for usage instructions.

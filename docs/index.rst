@@ -33,15 +33,19 @@ Architecture
 Pipeline
 --------
 
-The training pipeline runs in seven steps:
+``run.py`` contains four pipeline variants that differ in how data is split.
+The active variant is selected by commenting or uncommenting the relevant block
+in ``run.py``. All variants share these core steps:
 
-- **load_data** — loads order, product, and kiosk data from CSV; writes Parquet
+- **load_data** — loads order data from CSV into Parquet
+- **load_products** / **load_commerces** — loads product catalogue and kiosk metadata from CSV
 - **clean_blocked_products** — removes blocked products and their orders
+- **data_split** / **data_split_monthly** — splits orders into train and test sets *(pipelines 3 and 4 only)*
 - **build_baskets** — groups order items into baskets (min. 2 items)
-- **data_split** — splits baskets 80 / 20 into train and test sets
 - **train_model** — trains Word2Vec (skip-gram, vector size 35, window 100)
 - **ranker_training_pipeline_fast** — trains a LightGBM ranker on Word2Vec embeddings
-- **test_model** — evaluates both models on the held-out test set
+
+See :doc:`quickstart` for a summary of all four pipeline variants.
 
 
 Backend API

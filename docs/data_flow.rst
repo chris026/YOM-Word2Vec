@@ -74,7 +74,7 @@ Intermediate artifacts
      - Key columns
    * - ``data/baskets.parquet``
      - Products grouped per order
-     - ``orderid``, basket list
+     - ``orderid``, ``basket`` (product list), ``userid``, ``origin``
    * - ``data/train_df.parquet``
      - 80 % training baskets
      - ``orderid``, basket list

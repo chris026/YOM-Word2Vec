@@ -23,17 +23,17 @@ Model feature set
 +--------------------+-------------------+--------------------------------------------------------------+
 | ``pop_region``     | UInt16            | Purchase count of candidate within the kiosk's region        |
 +--------------------+-------------------+--------------------------------------------------------------+
-| ``pop_store``      | UInt8             | Purchase count of candidate within this specific kiosk       |
-+--------------------+-------------------+--------------------------------------------------------------+
 | ``channel``        | Category (String) | Channel of the kiosk (from ``commerces.csv``)                |
 +--------------------+-------------------+--------------------------------------------------------------+
-| ``subchannel``     | Category (String) | Subchannel of the kiosk                                      |
-+--------------------+-------------------+--------------------------------------------------------------+
-| ``region``         | Category (String) | Geographic region of the kiosk                               |
+| ``pop_store``      | UInt8             | Purchase count of candidate within this specific kiosk       |
 +--------------------+-------------------+--------------------------------------------------------------+
 | ``commune``        | Category (String) | Geographic commune of the kiosk                              |
 +--------------------+-------------------+--------------------------------------------------------------+
 | ``cand_category``  | Category (String) | Product category of the candidate item                       |
++--------------------+-------------------+--------------------------------------------------------------+
+| ``region``         | Category (String) | Geographic region of the kiosk                               |
++--------------------+-------------------+--------------------------------------------------------------+
+| ``subchannel``     | Category (String) | Subchannel of the kiosk                                      |
 +--------------------+-------------------+--------------------------------------------------------------+
 
 Signal groups
