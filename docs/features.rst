@@ -67,6 +67,12 @@ Processing rules
   native categorical support — no manual encoding is required.
 - Popularity counters are pre-computed by ``prepare_data()`` and joined into
   the feature matrix by ``build_feature_matrix()``.
+- At **serving time**, all four popularity counters are log-scaled via
+  ``numpy.log1p`` before being passed to the ranker (see
+  ``serve_bundle.py::recommend_candidates``). During training the raw integer
+  counts are stored in ``artifacts/train.parquet``; because LightGBM uses
+  threshold splits and ``log1p`` is a monotonic transformation, the ranking
+  order of candidates is preserved.
 - The group sizes array (``artifacts/groups.npy``) encodes the number of
   candidates per query ``(orderid, anchor)`` and is required by LightGBM's
   LambdaRank objective.

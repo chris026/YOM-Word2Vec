@@ -29,13 +29,11 @@ FEATURE_COLS = [
     "sim_item2vec",
     "pop_global",
     "pop_subch",
-    #"pop_origin",
     "pop_region",
     "channel",
     "pop_store",
     "commune",
     "cand_category",
-    #"origin",
     "region",
     "subchannel",
 ]
@@ -44,7 +42,6 @@ CATEGORICAL_COLS = [
     "channel",
     "commune",
     "cand_category",
-    #"origin",
     "region",
     "subchannel",
 ]
@@ -148,7 +145,6 @@ def build_lookup_dicts(
     pop_store_path: str,
     pop_region_path: str,
     pop_subch_path: str,
-    #pop_origin_path: str,
 ):
     """Build in-memory lookup dictionaries from Parquet files.
 
@@ -211,13 +207,6 @@ def build_lookup_dicts(
         (_to_key(r["subchannel"]), _to_key(r["productid"])): int(r["pop_subch"])
         for r in pl.read_parquet(pop_subch_path).iter_rows(named=True)
     }
-    """
-    pop_origin = {
-        (_to_key(r["origin"]), _to_key(r["productid"])): int(r["pop_origin"])
-        for r in pl.read_parquet(pop_origin_path).iter_rows(named=True)
-    }
-    """
-    #return store_meta, prod_cat, prod_blocked, pop_global, pop_store, pop_region, pop_subch, pop_origin
     return store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch
 
 
@@ -228,17 +217,14 @@ def build_lookup_dicts(
 def recommend_candidates(
     anchor: str,
     userid: str,
-    #origin: str,
     w2v: Word2Vec,
     ranker: lgb.Booster,
     store_meta: dict,
     prod_cat: dict,
-    #prod_blocked: dict,
     pop_global: dict,
     pop_store: dict,
     pop_region: dict,
     pop_subch: dict,
-    #pop_origin: dict,
     topn: int = 10,
     basket: set[str] | None = None,
 ):
@@ -274,7 +260,6 @@ def recommend_candidates(
     basket = {_to_key(x) for x in (basket or set())}
     anchor = _to_key(anchor)
     userid = _to_key(userid)
-    #origin = _to_key(origin)
 
     retrieved = []
     if anchor in w2v.wv:
@@ -353,26 +338,22 @@ def recommend_candidates(
         ps = pop_store.get((userid, cand), 0)
         pr = pop_region.get((region, cand), 0)
         psub = pop_subch.get((subch, cand), 0)
-        #po = pop_origin.get((origin, cand), 0)
 
         pg = np.log1p(pg)
         ps = np.log1p(ps)
         pr = np.log1p(pr)
         psub = np.log1p(psub)
-        #po = np.log1p(po)
 
         rows.append(
             {
                 "sim_item2vec": w2v_sim,
                 "pop_global": pg,
                 "pop_subch": psub,
-                #"pop_origin": po,
                 "pop_region": pr,
                 "channel": channel,
                 "pop_store": ps,
                 "commune": commune,
                 "cand_category": cand_cat,
-                #"origin": origin,
                 "region": region,
                 "subchannel": subch,
             }
@@ -416,7 +397,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     w2v_path = str(REPO_ROOT / "models" / "word2vec.model")
     lgbm_path = str(REPO_ROOT / "models" / "lgbm_ranker.txt")
     topn = 20
-    #anchors_df = anchors_df.drop("origin")
 
     w2v, ranker = load_models(w2v_path, lgbm_path)
 
@@ -427,7 +407,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
         pop_store_path=str(REPO_ROOT / "artifacts" / "pop_store.parquet"),
         pop_region_path=str(REPO_ROOT / "artifacts" / "pop_region.parquet"),
         pop_subch_path=str(REPO_ROOT / "artifacts" / "pop_subch.parquet"),
-        #pop_origin_path="artifacts/pop_origin.parquet",
     )
 
     unknown = "UNKNOWN"
@@ -485,7 +464,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
         pop_store_vals: list[float] = []
         pop_region_vals: list[float] = []
         pop_subch_vals: list[float] = []
-        #pop_origin_vals: list[float] = []
         cand_cats: list[str] = []
 
         for rank, (cand, sim) in enumerate(retrieved, start=1):
@@ -495,7 +473,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
             pop_store_vals.append(float(np.log1p(pop_store.get((userid, cand), 0))))
             pop_region_vals.append(float(np.log1p(pop_region.get((region, cand), 0))))
             pop_subch_vals.append(float(np.log1p(pop_subch.get((subch, cand), 0))))
-            #pop_origin_vals.append(float(np.log1p(pop_origin.get((origin, cand), 0))))
             cand_cats.append(prod_cat.get(cand, unknown))
 
         n_candidates = len(candidates)
@@ -504,7 +481,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
                 {
                     "anchor_id": anchor_pid,
                     "userid": userid,
-                    #"origin": origin,
                     "recs": [],
                 }
             )
@@ -515,13 +491,11 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
                 "sim_item2vec": np.asarray(sim_item2vec, dtype=np.float32),
                 "pop_global": np.asarray(pop_global_vals, dtype=np.float32),
                 "pop_subch": np.asarray(pop_subch_vals, dtype=np.float32),
-                #"pop_origin": np.asarray(pop_origin_vals, dtype=np.float32),
                 "pop_region": np.asarray(pop_region_vals, dtype=np.float32),
                 "channel": pd.Categorical([channel] * n_candidates),
                 "pop_store": np.asarray(pop_store_vals, dtype=np.float32),
                 "commune": pd.Categorical([commune] * n_candidates),
                 "cand_category": pd.Categorical(cand_cats),
-                #"origin": pd.Categorical([origin] * n_candidates),
                 "region": pd.Categorical([region] * n_candidates),
                 "subchannel": pd.Categorical([subch] * n_candidates),
             },
@@ -541,7 +515,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
             {
                 "anchor_id": anchor_pid,
                 "userid": userid,
-                #"origin": origin,
                 "recs": recs_to_add,
             }
         )
@@ -549,7 +522,6 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(results, schema={
         "anchor_id": pl.Utf8,
         "userid": pl.Utf8,
-        #"origin": pl.Utf8,
         "recs": pl.List(pl.Utf8)
         })
 
@@ -586,7 +558,6 @@ def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: boo
     recs = recommend_candidates(
         anchor=anchor_id,
         userid=user_id,
-        #origin=origin,
         w2v=w2v,
         ranker=ranker,
         store_meta=store_meta,
@@ -595,7 +566,6 @@ def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: boo
         pop_store=pop_store,
         pop_region=pop_region,
         pop_subch=pop_subch,
-        #pop_origin=pop_origin,
         topn=topn,
         basket=set(),  # falls gerade einen Warenkorb besteht, hier rein
     )

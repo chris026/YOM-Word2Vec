@@ -32,16 +32,14 @@ Pipeline flow
 .. code-block:: text
 
    Raw CSV files
-     → load_data()           → data/orders.parquet
-                               data/commerces.parquet
-                               data/products.parquet
+     → load_data()           → data/2024-20250001_part_00-001_short.parquet
+     → load_commerces()      → data/commerces.parquet
+     → load_products()       → data/products_v2.parquet
      → clean_blocked()       → blocked products and their orders removed
      → build_baskets()       → data/baskets.parquet
-     → data_split()          → data/train_df.parquet
-                               data/test_df.parquet
 
    Word2Vec stage:
-     train_df
+     data/baskets.parquet
        → train_model()       → models/word2vec.model
 
    LightGBM stage:
@@ -73,8 +71,8 @@ Intermediate artifacts
      - Purpose
      - Key columns
    * - ``data/baskets.parquet``
-     - Products grouped per order
-     - ``orderid``, ``basket`` (product list), ``userid``, ``origin``
+     - Products grouped per order (used for Word2Vec training)
+     - ``orderid``, ``productid`` (product list)
    * - ``data/train_df.parquet``
      - 80 % training baskets
      - ``orderid``, basket list
@@ -112,13 +110,22 @@ Intermediate artifacts
 Serving artifacts
 -----------------
 
-The two model files are the only files needed at serving time:
+Eight files are bundled into the Docker image at build time and are available
+immediately at Lambda startup without any S3 or network dependency.
 
-- ``models/word2vec.model`` — loaded into memory for nearest-neighbour lookup
-- ``models/lgbm_ranker.txt`` — loaded for candidate re-ranking
+**Model files**
 
-They are bundled into the Docker image at build time and available immediately
-at Lambda startup without any S3 or network dependency.
+- ``models/word2vec.model`` — Word2Vec model for nearest-neighbour retrieval
+- ``models/lgbm_ranker.txt`` — LightGBM ranker for candidate re-ranking
+
+**Lookup data**
+
+- ``data/commerces.parquet`` — kiosk metadata (region, subchannel, channel, commune)
+- ``data/products_v2.parquet`` — product catalog (category per product)
+- ``artifacts/pop_global.parquet`` — global popularity lookup
+- ``artifacts/pop_store.parquet`` — per-kiosk popularity lookup
+- ``artifacts/pop_region.parquet`` — per-region popularity lookup
+- ``artifacts/pop_subch.parquet`` — per-subchannel popularity lookup
 
 Why this flow is used
 ---------------------

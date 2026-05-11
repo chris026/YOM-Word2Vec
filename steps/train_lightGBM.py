@@ -103,7 +103,6 @@ def prepare_data(
         baskets_path,
         pop_global_path,
         pop_store_path,
-        #pop_origin_path,
         pop_region_path,
         pop_subch_path,
     )
@@ -602,7 +601,6 @@ def ranker_training_pipeline_fast(
         baskets_path,
         pop_global_path,
         pop_store_path,
-        #pop_origin_path,
         pop_region_path,
         pop_subch_path,
     ) = prepare_data(
@@ -638,7 +636,6 @@ def ranker_training_pipeline_fast(
         products_path=products_path,
         pop_global_path=pop_global_path,
         pop_store_path=pop_store_path,
-        #pop_origin_path=pop_origin_path,
         pop_region_path=pop_region_path,
         pop_subch_path=pop_subch_path,
         ranker_lf_path = label_candidates_path,
