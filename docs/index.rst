@@ -13,9 +13,9 @@ A product recommendation system using Word2Vec for candidate retrieval and Light
    features
    configuration
    design
-   api
    dashboard
    ab_test
+   testing
 
 Pipeline
 --------
