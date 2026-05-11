@@ -62,6 +62,13 @@ Word2Vec requires at least two tokens per sequence.
 Two split strategies are available: a simple random 80 / 20 split and a
 time-based split where the last two calendar months are held out for testing.
 
+**Why 80 / 20?**
+
+The 80 / 20 ratio is the standard baseline for this dataset size. The
+time-based alternative (``data_split_monthly``) is available when evaluating
+model behaviour on the most recent purchase patterns is more important than
+maximising training data volume.
+
 .. autofunction:: steps.train_Word2Vec.build_baskets
 
 .. autofunction:: steps.train_Word2Vec.data_split
@@ -79,6 +86,21 @@ similarity. Key hyperparameters: ``vector_size=35``, ``window=100``,
 
 The trained model is saved to ``models/word2vec.model``.
 
+**Why these hyperparameters?**
+
+- ``window=100`` — covers the entire basket as context for every product.
+  Within a basket there is no meaningful item order, so all products should
+  mutually influence each other's embeddings equally.
+- ``sg=1`` (skip-gram) — generalises better to rare products than CBOW because
+  it trains a dedicated prediction task per target word rather than averaging
+  context vectors.
+- ``vector_size=35`` — small enough to satisfy the mobile offline deployment
+  constraint while capturing sufficient co-purchase signal.
+- ``min_count=2`` — products appearing only once carry no co-purchase signal
+  and are excluded from the vocabulary.
+- ``shrink_windows=False`` — disables window size randomisation; every product
+  gets the full context window consistently.
+
 .. autofunction:: steps.train_Word2Vec.train_model
 
 .. autofunction:: steps.train_Word2Vec.retrieve_candidates
@@ -89,7 +111,22 @@ LightGBM Ranker Training
 
 The ranker pipeline takes the Word2Vec model and raw data as input and produces
 a trained LightGBM model (``LambdaRank`` objective) saved to
-``models/lgbm_ranker.txt``. It consists of six sub-steps:
+``models/lgbm_ranker.txt``. It consists of six sub-steps.
+
+**Why LambdaRank?**
+
+The task is ranking candidates within each query group ``(orderid, anchor)``.
+LambdaRank directly optimises a ranking metric (NDCG) rather than a
+classification or regression loss, which is the correct formulation for a
+re-ranker. See :doc:`design` for the full rationale.
+
+**Why** ``topk=10`` **for negatives?**
+
+Generating 10 hard negatives per anchor provides enough negative signal to
+train the ranker without making the feature matrix prohibitively large.
+Hard negatives — the top-10 Word2Vec neighbours that were *not* purchased —
+are more informative than random negatives because they force the ranker to
+distinguish truly co-purchased items from merely similar ones.
 
 .. autofunction:: steps.train_lightGBM.ranker_training_pipeline_fast
 

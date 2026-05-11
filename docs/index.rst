@@ -7,9 +7,13 @@ A product recommendation system using Word2Vec for candidate retrieval and Light
    :maxdepth: 2
    :caption: Contents
 
+   quickstart
+   data_flow
    pipeline
-   api
+   features
+   configuration
    design
+   api
    dashboard
    ab_test
 
