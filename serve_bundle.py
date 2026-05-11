@@ -50,6 +50,26 @@ CATEGORICAL_COLS = [
 ]
 
 def get_runtime_objects():
+    """Load and cache all runtime objects needed for inference.
+
+    Models and lookup dictionaries are initialised once on the first call
+    and reused on every subsequent call (module-level singletons).
+
+    Returns:
+        A tuple of nine objects:
+        ``(w2v, ranker, store_meta, prod_cat, pop_global, pop_store,
+        pop_region, pop_subch, prod_name)``.
+        - ``w2v`` – loaded :class:`gensim.models.Word2Vec` model
+        - ``ranker`` – loaded :class:`lightgbm.Booster`
+        - ``store_meta`` – dict mapping ``userid`` → store context dict
+        - ``prod_cat`` – dict mapping ``productid`` → category string
+        - ``pop_global`` – dict mapping ``productid`` → global order count
+        - ``pop_store`` – dict mapping ``(userid, productid)`` → store count
+        - ``pop_region`` – dict mapping ``(region, productid)`` → region count
+        - ``pop_subch`` – dict mapping ``(subchannel, productid)`` → subchannel count
+        - ``prod_name`` – dict mapping ``productid`` → product name
+    """
+
     global _W2V, _RANKER
     global _STORE_META, _PROD_CAT, _POP_GLOBAL, _POP_STORE, _POP_REGION, _POP_SUBCH
     global _PROD_NAME
@@ -107,6 +127,16 @@ def _to_key(v) -> str:
     return str(v)
 
 def load_models(w2v_path: str, lgbm_path: str):
+    """Load Word2Vec and LightGBM models from disk.
+
+    Args:
+        w2v_path: Path to the saved Word2Vec model file.
+        lgbm_path: Path to the saved LightGBM booster text file.
+
+    Returns:
+        A tuple ``(w2v, ranker)`` with the loaded model objects.
+    """
+
     w2v = Word2Vec.load(w2v_path)
     ranker = lgb.Booster(model_file=lgbm_path)
     return w2v, ranker
@@ -120,6 +150,26 @@ def build_lookup_dicts(
     pop_subch_path: str,
     #pop_origin_path: str,
 ):
+    """Build in-memory lookup dictionaries from Parquet files.
+
+    Reads commerces, products, and popularity Parquet files and converts
+    them into plain Python dicts for fast O(1) lookups at inference time.
+    Popularity values are stored as raw counts (log-scaling is applied
+    during inference in :func:`recommend_candidates`).
+
+    Args:
+        commerces_path: Path to the commerces Parquet file.
+        products_path: Path to the products Parquet file.
+        pop_global_path: Path to the global popularity Parquet file.
+        pop_store_path: Path to the per-store popularity Parquet file.
+        pop_region_path: Path to the per-region popularity Parquet file.
+        pop_subch_path: Path to the per-subchannel popularity Parquet file.
+
+    Returns:
+        A tuple of six dicts:
+        ``(store_meta, prod_cat, pop_global, pop_store, pop_region, pop_subch)``.
+    """
+
     commerces = pl.read_parquet(commerces_path).select(
         ["userid", "region", "subchannel", "channel", "commune"]
     )
@@ -192,6 +242,35 @@ def recommend_candidates(
     topn: int = 10,
     basket: set[str] | None = None,
 ):
+    """Generate ranked product recommendations for a single anchor–user pair.
+
+    Retrieves the top-50 Word2Vec neighbours of ``anchor``, builds a
+    feature matrix with store context and popularity scores, and re-ranks
+    the candidates using the LightGBM ranker. Falls back to global
+    popularity ranking when the anchor is not in the Word2Vec vocabulary
+    or yields no valid candidates.
+
+    Args:
+        anchor: Product ID to base recommendations on.
+        userid: User (store) ID — used to look up store context features.
+        w2v: Loaded Word2Vec model.
+        ranker: Loaded LightGBM booster.
+        store_meta: Store context lookup dict from :func:`build_lookup_dicts`.
+        prod_cat: Product category lookup dict.
+        pop_global: Global popularity lookup dict.
+        pop_store: Per-store popularity lookup dict.
+        pop_region: Per-region popularity lookup dict.
+        pop_subch: Per-subchannel popularity lookup dict.
+        topn: Number of recommendations to return. Defaults to ``10``.
+        basket: Set of product IDs already in the current basket, excluded
+            from recommendations. Defaults to ``None`` (empty set).
+
+    Returns:
+        A list of up to ``topn`` ``(product_id, score)`` tuples ordered by
+        descending LightGBM score. Returns an empty list if no candidates
+        can be generated.
+    """
+
     basket = {_to_key(x) for x in (basket or set())}
     anchor = _to_key(anchor)
     userid = _to_key(userid)
@@ -319,9 +398,21 @@ def recommend_candidates(
     return ranked[:topn]
 
 def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
+    """Generate recommendations for a batch of anchor–user pairs.
+
+    Loads models and lookup dicts fresh on each call. Uses a pre-computed
+    retrieval cache (top-50 Word2Vec neighbours per anchor) to avoid
+    redundant similarity lookups across rows.
+
+    Args:
+        anchors_df: Polars DataFrame with columns ``anchor_pid`` and
+            ``userid``.
+
+    Returns:
+        Polars DataFrame with columns ``anchor_id``, ``userid``, and
+        ``recs`` (list of recommended product ID strings, up to 20 items).
     """
-    anchors_df must contains the colums "anchor_pid" and "userid".
-    """
+
     w2v_path = str(REPO_ROOT / "models" / "word2vec.model")
     lgbm_path = str(REPO_ROOT / "models" / "lgbm_ranker.txt")
     topn = 20
@@ -463,6 +554,23 @@ def getMultiRec(anchors_df: pl.DataFrame) -> pl.DataFrame:
         })
 
 def getSingleRec(anchor_id: str, user_id: str, topn: int = 30, addDebugInfo: bool = False) -> pl.DataFrame:
+    """Generate recommendations for a single anchor–user pair.
+
+    Uses the module-level cached runtime objects from
+    :func:`get_runtime_objects`. Prints the anchor product name and a
+    ranked recommendation table to stdout.
+
+    Args:
+        anchor_id: Product ID to base recommendations on.
+        user_id: User (store) ID.
+        topn: Number of recommendations to return. Defaults to ``30``.
+        addDebugInfo: If ``True``, includes ``name`` and ``score`` columns
+            in the returned DataFrame. Defaults to ``False``.
+
+    Returns:
+        Polars DataFrame with columns ``anchor_id``, ``user_id``,
+        ``product_id``, and optionally ``name`` and ``score``.
+    """
     (
         w2v,
         ranker,

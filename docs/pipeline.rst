@@ -18,20 +18,18 @@ The following steps are executed in order:
 
    * - Step
      - Description
-   * - ``load_data``
+   * - ``load_data`` / ``load_data_testTrain_seperated``
      - Load orders, products, and commerces from CSV into Parquet
    * - ``clean_blocked_products``
      - Remove products flagged as blocked and the associated orders
+   * - ``data_split`` / ``data_split_monthly`` *(pipeline-abhängig)*
+     - Split orders into train and test sets — nur in Pipeline 3 und 4
    * - ``build_baskets``
      - Group order lines into per-order product baskets (min. 2 items)
-   * - ``data_split``
-     - Split baskets 80 / 20 into train and test sets
    * - ``train_model``
      - Train a Word2Vec skip-gram model on training baskets
    * - ``ranker_training_pipeline_fast``
      - Train a LightGBM ranker on top of Word2Vec candidate embeddings
-   * - ``test_model``
-     - Evaluate both models on the test set (Precision, Recall, NDCG)
 
 
 Data Loading
@@ -41,22 +39,21 @@ Raw order and product data is read from CSV files and converted to Parquet for
 efficient downstream processing. Blocked products (``blocked=True``) are removed
 before any modelling step, together with the corresponding order rows.
 
-Two loading functions are available depending on how much data is being processed:
+Zwei Ladefunktionen stehen zur Verfügung — die Wahl hängt von der aktiven Pipeline ab:
 
 .. list-table::
    :header-rows: 1
    :widths: 25 35 40
 
-   * - Modus
+   * - Pipeline
      - Funktion
      - Wann verwenden
-   * - Standard
+   * - 1, 3, 4
      - ``load_data()``
-     - Wenige Monate Daten in einer einzigen CSV-Datei
-       (``data/2024-20250001_part_00-001_short.csv``).
-   * - Multi-Month
+     - Einzelne CSV-Datei mit allen Bestellungen.
+   * - 2
      - ``load_data_testTrain_seperated()``
-     - Mehrere Monate Daten, die bereits extern aufgeteilt wurden.
+     - Daten kommen extern vorgesplittet als zwei separate Dateien.
        Erwartet ``data/train_df_1m.csv`` und ``data/test_df_1m.csv``
        und gibt beide Pfade zurück.
 
@@ -80,41 +77,46 @@ Orders are grouped by ``orderid`` to create baskets — lists of products that w
 purchased together. Baskets with fewer than two items are discarded because
 Word2Vec requires at least two tokens per sequence.
 
-Two strategies are available depending on the volume and time span of the data.
-The active variant is selected by commenting or uncommenting the relevant lines
-in ``run.py`` — there is no single flag variable:
+``run.py`` enthält vier Pipelines, die sich darin unterscheiden, wie und ob die
+Daten gesplittet werden. Die aktive Pipeline wird durch Kommentieren bzw.
+Auskommentieren der jeweiligen Zeilen in ``run.py`` gewählt — es gibt keine
+einzelne Konfigurationsvariable.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 40 40
+   :widths: 5 20 30 25 20
 
-   * - Schritt
-     - Standard-Modus (wenige Monate)
-     - Multi-Month-Modus (mehrere Monate)
-   * - Basket-Building
+   * - #
+     - Name
+     - Split-Funktion
+     - Zeitpunkt des Splits
+     - Basket-Funktion
+   * - 1
+     - Kein Split *(Default)*
+     - —
+     - —
      - ``build_baskets()``
-       Nur ``orderid`` und ``productid`` werden behalten.
-     - ``build_baskets_monthly()``
-       Bewahrt zusätzlich ``orderdt`` — zwingend erforderlich
-       für den zeitbasierten Split.
-   * - Train/Test-Split
+   * - 2
+     - Externer Split
+     - extern (zwei CSVs)
+     - vor dem Pipeline-Start
+     - ``build_baskets()``
+   * - 3
+     - 80/20-Zufallssplit
      - ``data_split()``
-       Zufälliger 80 / 20-Split. Benötigt keine Datumsspalte.
-       Maximiert das Trainingsvolumen.
+     - nach ``clean_blocked_products``
+     - ``build_baskets()``
+   * - 4
+     - Monatlicher Split
      - ``data_split_monthly()``
-       Hält die letzten zwei Kalendermonate als Testset zurück.
-       Evaluiert das Modell auf den aktuellsten Kaufmustern.
-       Erfordert die ``orderdt``-Spalte aus ``build_baskets_monthly``.
+     - nach ``clean_blocked_products``, **vor** ``build_baskets``
+     - ``build_baskets()``
 
 .. note::
 
-   Im Multi-Month-Modus muss **zwingend** ``build_baskets_monthly`` statt
-   ``build_baskets`` verwendet werden, da ``data_split_monthly`` die
-   ``orderdt``-Spalte für den zeitbasierten Split benötigt. Außerdem sollte
-   ``clean_blocked_products`` auch auf den Testdaten-Pfad angewendet werden
-   (die entsprechende Zeile ist in ``run.py`` auskommentiert), und der
-   ``test_model``-Schritt am Ende des Skripts sollte aktiviert werden, um
-   eine zeitlich valide Evaluation zu erhalten.
+   In Pipeline 4 erfolgt der monatliche Split auf den Rohdaten (Bestellzeilen),
+   bevor Baskets gebaut werden. Die letzten zwei Kalendermonate werden als
+   Testset zurückgehalten. Alle vier Pipelines verwenden ``build_baskets()``.
 
 .. autofunction:: steps.train_Word2Vec.build_baskets
 

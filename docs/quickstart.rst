@@ -38,58 +38,73 @@ Setup
 Pipeline-Modus wählen
 ---------------------
 
-Bevor du ``run.py`` ausführst, entscheide welcher Modus zu deinem Datensatz passt.
-Der Modus wird durch Kommentieren bzw. Auskommentieren einzelner Zeilen in
-``run.py`` gewählt — es gibt keine einzelne Konfigurationsvariable.
+``run.py`` enthält vier Pipelines. Immer nur eine ist aktiv; die anderen sind
+auskommentiert. Den gewünschten Block auskommentieren und den Rest aktivieren.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 35 35
+   :widths: 5 30 35 30
 
-   * - Kriterium
-     - Standard-Modus
-     - Multi-Month-Modus
-   * - Datenmenge
-     - Wenige Monate in einer CSV-Datei
-     - Mehrere Monate, extern vorgesplittet
-   * - Datei laden
-     - ``load_data()``
-     - ``load_data_testTrain_seperated()``
-   * - Basket-Building
-     - ``build_baskets()``
-     - ``build_baskets_monthly()`` *(bewahrt ``orderdt``)*
-   * - Train/Test-Split
+   * - #
+     - Name
+     - Wann verwenden
+     - Split
+   * - 1
+     - **Kein Split** *(aktiv per Default)*
+     - Exploration, kleine Datasets oder wenn kein Testset benötigt wird.
+       Trainiert auf allen Daten.
+     - keiner
+   * - 2
+     - **Externer Split**
+     - Daten kommen extern vorgesplittet als zwei separate CSV-Dateien
+       (``train_df_1m.csv`` / ``test_df_1m.csv``).
+     - extern (zwei CSVs)
+   * - 3
+     - **80/20-Zufallssplit**
+     - Einzelne CSV-Datei; zufällige Train/Test-Aufteilung in Python.
+       Maximiert das Trainingsvolumen.
      - ``data_split()`` — zufällig 80 / 20
-     - ``data_split_monthly()`` — letzte 2 Monate als Test
+   * - 4
+     - **Monatlicher Split**
+     - Einzelne CSV-Datei; zeitlich valide Evaluation. Die letzten zwei
+       Kalendermonate werden als Testset zurückgehalten.
+     - ``data_split_monthly()`` — letzte 2 Monate
 
-**Standard-Modus (aktiv per Default):** Keine Änderungen an ``run.py`` nötig.
+**Pipeline 1 — Kein Split (aktiv per Default):** Keine Änderungen an ``run.py`` nötig.
 
-**Multi-Month-Modus:** Folgende Zeilen in ``run.py`` anpassen:
+**Pipeline 2 — Externer Split:** Den Block ab ``load_data_testTrain_seperated()``
+einkommentieren und den Pipeline-1-Block auskommentieren:
 
 .. code-block:: python
 
-   # Daten laden — Zeile aktivieren, load_data() auskommentieren:
+   # Pipeline 2 aktivieren:
    data_path_train, data_path_test = load_data_testTrain_seperated()
-   # data_path_train = load_data()
-
-   # Baskets mit Datum bauen (statt build_baskets):
-   train_df_path = word2vec_model.build_baskets_monthly(data_path_train)
-
-   # Zeitbasierten Split aktivieren:
-   train_df, test_df = word2vec_model.data_split_monthly(baskets_path)
-   train_df_path, test_df_path = save_train_test_split(train_df, test_df)
-
-   # clean_blocked_products auch auf Testdaten anwenden:
+   # ...
    data_path_test, _ = clean_blocked_products(data_path_test, products_path)
+   train_df_path = word2vec_model.build_baskets(data_path_train)
 
-   # Evaluation am Ende aktivieren:
-   metrics = test_model(test_df_path, W2Vmodel_path, LGM_model_path)
+**Pipeline 3 — 80/20-Zufallssplit:** Den Block ab ``data_split()`` einkommentieren:
 
-.. note::
+.. code-block:: python
 
-   ``build_baskets_monthly`` ist im Multi-Month-Modus zwingend erforderlich,
-   da ``data_split_monthly`` die ``orderdt``-Spalte benötigt, die nur diese
-   Funktion bewahrt.
+   # Pipeline 3 aktivieren:
+   data_path_train = load_data()
+   train_df, test_df = word2vec_model.data_split(data_path_train)
+   data_path_train, data_path_test = save_train_test_split(train_df, test_df)
+   # ...
+   train_df_path = word2vec_model.build_baskets(data_path_train)
+
+**Pipeline 4 — Monatlicher Split:** Den Block ab ``data_split_monthly()``
+einkommentieren. Der Split erfolgt auf den Rohdaten *vor* dem Basket-Building:
+
+.. code-block:: python
+
+   # Pipeline 4 aktivieren:
+   data_path_train = load_data()
+   data_path_train, products_path = clean_blocked_products(data_path_train, products_path)
+   train_df, test_df = word2vec_model.data_split_monthly(data_path_train)
+   data_path_train, data_path_test = save_train_test_split(train_df, test_df)
+   train_df_path = word2vec_model.build_baskets(data_path_train)
 
 Step 1 — Training
 -----------------
