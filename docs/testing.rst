@@ -4,9 +4,8 @@ Testing
 Overview
 --------
 
-The ``tests/`` directory contains four scripts for offline evaluation and
-result visualisation. They sit outside the ZenML pipeline and are run
-manually after training.
+The ``tests/`` directory contains three scripts for offline evaluation.
+They sit outside the ZenML pipeline and are run manually after training.
 
 .. list-table::
    :header-rows: 1
@@ -23,9 +22,6 @@ manually after training.
    * - ``model_test.py``
      - Full serving stack (``getMultiRec``)
      - One random product per order
-   * - ``show_results.py``
-     - Visualisation of saved results
-     - n/a
 
 When to run which script
 ------------------------
@@ -37,8 +33,6 @@ When to run which script
 - **Before releasing a new model version** — run ``model_test.py`` to test
   the full serving stack end-to-end, including caching and the fallback
   logic in ``getMultiRec``.
-- **To compare runs visually** — save the stdout of any testbench as a
-  semicolon-delimited CSV and pass it to ``show_results.py``.
 
 
 W2V_testbench.py
@@ -250,44 +244,3 @@ Configuration block followed by a metrics table::
 
 A warning is printed when ``getMultiRec`` returns fewer items than the
 largest K, since metrics for those cutoffs are based on shorter lists.
-
-
-show_results.py
----------------
-
-Reads one or more semicolon-delimited CSV result files and generates
-matplotlib plots for comparing multiple models or training-data lengths.
-
-**What it does**
-
-The script detects multiple models within a single file by looking for a
-repeating K cycle (e.g. ``5, 10, 20, 50 | 5, 10, 20, 50 | ...``). Each
-cycle is treated as one model and labelled by its index (interpreted as
-training-data length in months). If at least two input files each contain
-a model at index 2, an additional cross-file comparison plot is generated.
-
-**Usage**
-
-::
-
-   # Default: reads tests/MBA.csv and tests/W2V.csv
-   python tests/show_results.py
-
-   # Custom files
-   python tests/show_results.py tests/W2V.csv tests/MBA.csv
-
-   # Save plots as PNG without opening an interactive window
-   python tests/show_results.py --save-dir results/ --no-show
-
-**CSV format**
-
-The result files are semicolon-separated with a comma as decimal mark,
-matching the output format of the testbenches when redirected to a file::
-
-   K;HitRate;Recall;MRR;Precision;Positives
-   5;0,312000;0,101000;0,154000;0,062400;0,312000
-   10;0,421000;0,136000;0,163000;0,042100;0,421000
-   ...
-
-The ``K`` column is required. All other columns are optional; the script
-plots whichever metric columns it finds.
