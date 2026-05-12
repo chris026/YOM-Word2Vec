@@ -57,6 +57,12 @@ Two loading functions are available — the choice depends on the active pipelin
        Expects ``data/train_df_1m.csv`` and ``data/test_df_1m.csv``
        and returns both paths.
 
+.. note::
+
+   The filenames ``train_df_1m.csv`` and ``test_df_1m.csv`` are the defaults,
+   but any CSV files can be used. Update the file paths directly in ``run.py``
+   to point to the desired files.
+
 .. autofunction:: steps.load_data.load_data
 
 .. autofunction:: steps.load_data.load_data_testTrain_seperated
@@ -83,39 +89,35 @@ relevant lines in ``run.py`` — there is no single flag variable.
 
 .. list-table::
    :header-rows: 1
-   :widths: 5 20 30 25 20
+   :widths: 5 20 35 40
 
    * - #
      - Name
      - Split function
-     - When the split happens
      - Basket function
    * - 1
      - No split *(default)*
-     - —
      - —
      - ``build_baskets()``
    * - 2
      - External split
      - external (two CSVs)
-     - before the pipeline starts
      - ``build_baskets()``
    * - 3
      - 80/20 random split
      - ``data_split()``
-     - **before** ``clean_blocked_products``
      - ``build_baskets()``
    * - 4
      - Monthly split
      - ``data_split_monthly()``
-     - after ``clean_blocked_products``, **before** ``build_baskets``
      - ``build_baskets()``
 
 .. note::
 
-   In pipeline 4 the monthly split is applied to the raw order rows before
-   baskets are built. The last two calendar months are held out as the test set.
-   All four pipelines use ``build_baskets()``.
+   In all split pipelines (2, 3, 4), ``clean_blocked_products`` is applied
+   **before** the split so that train and test are drawn from the same cleaned
+   dataset. In pipeline 4 the last two calendar months are held out as the test
+   set. All four pipelines use ``build_baskets()``.
 
 .. autofunction:: steps.train_Word2Vec.build_baskets
 

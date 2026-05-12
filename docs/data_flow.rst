@@ -18,7 +18,7 @@ Input data
      - Key columns
    * - ``data/*.csv``
      - Order transaction data
-     - ``orderid``, ``productid``, ``userid``, ``orderdt``, quantity
+     - ``orderid``, ``productid``, ``userid``, ``orderdt``, ``quantity``
    * - ``data/commerces.csv``
      - Kiosk metadata
      - ``userid``, ``channel``, ``subchannel``, ``region``, ``commune``, ``active``
@@ -109,9 +109,6 @@ Intermediate artifacts
 
 Serving artifacts
 -----------------
-
-Eight files are bundled into the Docker image at build time and are available
-immediately at Lambda startup without any S3 or network dependency.
 
 **Model files**
 
