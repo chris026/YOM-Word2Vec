@@ -3,7 +3,7 @@ from steps.load_data import load_data, load_data_testTrain_seperated, load_produ
 import steps.train_Word2Vec as word2vec_model
 from steps.train_lightGBM import ranker_training_pipeline_fast
 
-@pipeline(enable_cache=True)
+@pipeline(enable_cache=False)
 def run_pipeline():
     #Pipeline with no split
     data_path_train = load_data()
@@ -48,10 +48,9 @@ def run_pipeline():
     # data_path_train = load_data()
     # commerces_path = load_commerces()
     # products_path = load_products()
+    # data_path_train, products_path = clean_blocked_products(data_path_train, products_path)
     # train_df, test_df = word2vec_model.data_split(data_path_train)
     # data_path_train, data_path_test = save_train_test_split(train_df, test_df)
-    # data_path_train, products_path = clean_blocked_products(data_path_train, products_path)
-    # data_path_test, _ = clean_blocked_products(data_path_test, products_path)
     # train_df_path = word2vec_model.build_baskets(data_path_train)
     # W2Vmodel_path = word2vec_model.train_model(train_df_path)
 

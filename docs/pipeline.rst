@@ -144,14 +144,26 @@ The trained model is saved to ``models/word2vec.model``.
   Within a basket there is no meaningful item order, so all products should
   mutually influence each other's embeddings equally.
 - ``sg=1`` (skip-gram) — generalises better to rare products than CBOW because
-  it trains a dedicated prediction task per target word rather than averaging
-  context vectors.
-- ``vector_size=35`` — small enough to satisfy the mobile offline deployment
-  constraint while capturing sufficient co-purchase signal.
+  it predicts multiple context words from a single target word, generating more
+  training signal per occurrence. CBOW works in the opposite direction: it
+  averages multiple context words to predict one target word, which dilutes
+  the signal for rare products.
+- ``vector_size=35`` — chosen based on empirical tests with one month of
+  training data across sizes 10, 20, 30, 35, 40, 50, and 100. Size 35
+  performed best while remaining small enough to satisfy the mobile offline
+  deployment constraint.
 - ``min_count=2`` — products appearing only once carry no co-purchase signal
   and are excluded from the vocabulary.
 - ``shrink_windows=False`` — disables window size randomisation; every product
   gets the full context window consistently.
+
+.. note::
+
+   The hyperparameters above are not exhaustive. Gensim's Word2Vec exposes
+   additional parameters — such as ``epochs``, ``alpha`` (learning rate),
+   ``negative`` (number of negative samples), and ``ns_exponent`` — that
+   may further improve embedding quality and are worth exploring when more
+   training data or compute is available.
 
 .. autofunction:: steps.train_Word2Vec.train_model
 
