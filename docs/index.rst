@@ -73,8 +73,6 @@ Contents
    features
    configuration
    design
-   dashboard
-   ab_test
    testing
    deployment
    backend-architecture
