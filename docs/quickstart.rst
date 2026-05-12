@@ -66,6 +66,8 @@ Then copy or move the following files into that folder:
    Only one order CSV is required to get started. You can place additional order files
    in the same ``data/`` folder and pick them later in the process.
 
+Also create the ``models/`` directory in the project root.
+
 Choosing a pipeline
 -------------------
 
