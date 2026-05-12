@@ -71,7 +71,12 @@ Contents
    dashboard
    ab_test
    testing
-
+   deployment
+   backend-architecture
+   api
+   aws-configuration
+   ci-cd
+   troubleshooting
 
 Indices and tables
 ==================
