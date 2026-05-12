@@ -16,6 +16,9 @@ the pipeline.
 Metric Definitions
 ------------------
 
+The metrics were defined in collaboration with YOM to reflect the
+business goals of the recommender system.
+
 All metrics below are computed globally across the entire system,
 aggregating all recommendations, impressions, clicks, visits, and
 purchases, unless stated otherwise. :math:`B` denotes a bundle (a set
@@ -41,13 +44,6 @@ purchased.
 .. math::
 
    \text{BTR} = \frac{\#\,\text{Bundles purchased}}{\#\,\text{Bundles displayed}}
-
-**Conversion Rate (CR)** — share of bundle visits that ended in a
-purchase.
-
-.. math::
-
-   \text{CR} = \frac{\#\,\text{Bundles purchased}}{\#\,\text{Bundle visits}}
 
 **Absolute Additional Sales** — number of purchases attributed to the
 recommender, i.e. purchases that followed a recommendation click. On

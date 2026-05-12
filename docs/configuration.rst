@@ -88,10 +88,7 @@ Configured in ``steps/train_Word2Vec.py`` and ``steps/train_lightGBM.py``.
    * - Train / test split
      - none / 80 / 20 / last 2 months
      - Selected by commenting or uncommenting the relevant pipeline block in
-       ``run.py``. Pipeline 1: no split. Pipeline 3: random 80 / 20
-       (``data_split``). Pipeline 4: time-based split
-       (``data_split_monthly``), holding out the two most recent months.
-       Pipeline 2: split is done externally before the pipeline runs.
+       ``run.py``.
    * - Minimum basket size
      - ``2``
      - Baskets with fewer than 2 items are discarded before Word2Vec training.

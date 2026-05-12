@@ -163,7 +163,7 @@ The trained model is saved to ``models/word2vec.model``.
    additional parameters — such as ``epochs``, ``alpha`` (learning rate),
    ``negative`` (number of negative samples), and ``ns_exponent`` — that
    may further improve embedding quality and are worth exploring when more
-   training data or compute is available.
+   compute is available.
 
 .. autofunction:: steps.train_Word2Vec.train_model
 
