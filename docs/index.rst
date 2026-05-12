@@ -1,6 +1,10 @@
 YOM Word2Vec Recommender
 ========================
 
+.. image:: https://img.shields.io/badge/Python-3.12+-blue.svg
+   :target: https://www.python.org/downloads/
+   :alt: Python Version
+
 This system recommends products that customers are likely to add to their
 basket alongside an anchor product they have already selected. It is designed
 for retail kiosks that operate offline and on mobile hardware, where low
@@ -61,6 +65,7 @@ Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Contents
 
    quickstart
    data_flow
