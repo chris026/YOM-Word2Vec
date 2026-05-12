@@ -5,6 +5,7 @@ This page describes the planned online A/B test that compares two
 versions of the bundle recommender. The test is designed to determine,
 with statistical significance, whether the new algorithm improves the
 **Bundle Take Rate (BTR)** over the current production baseline.
+A detailed treatment of the methodology is given in [Hagemeyer2025]_.
 
 The test has not been executed yet. All parameters below are sensible
 defaults chosen to fit the volume of traffic on the platform
@@ -41,13 +42,20 @@ BTR is the share of displayed bundles that are actually purchased:
 
    \text{BTR} = \frac{\#\,\text{Bundles purchased}}{\#\,\text{Bundles displayed}}
 
-BTR is the right primary metric for this comparison because it
-directly measures the bottom-line outcome the recommender is built to
-drive: how often a displayed bundle ends up being bought. Unlike CTR
-or CTP, which only capture one stage of the funnel, BTR collapses the
-entire impression-to-purchase journey into a single number and
-therefore aligns naturally with the *Absolute Additional Sales* KPI
-that the business cares about.
+Together with YOM, two key business metrics were defined for evaluating
+the recommender: **BTR** and **Absolute Additional Sales (AAS)**. In
+principle, either metric — or any other measurable outcome — could
+serve as the primary criterion for an online test.
+
+BTR was chosen as the primary metric for this experiment because the
+recommender system is explicitly designed to improve it: every
+modelling decision (co-purchase embeddings, LightGBM re-ranking) is
+optimised to increase the share of displayed bundles that are actually
+purchased. Using BTR as the test criterion therefore ensures that the
+experiment directly measures what the system was built to do. AAS
+remains a guardrail metric (see below) and provides the business with
+an absolute revenue figure, but it is a downstream consequence of BTR
+improvements rather than the direct signal the recommender acts on.
 
 
 Test Design
@@ -201,8 +209,8 @@ and the test statistic
 
 Reject :math:`H_0` in favour of :math:`H_1` if :math:`t > t_{\text{crit}}`,
 where :math:`t_{\text{crit}}` is the one-sided critical value at
-:math:`\alpha = 0.05` for :math:`n_{df}` degrees of freedom (≈ 1.645
-for large :math:`n_{df}`). A rejection is interpreted as evidence that
+:math:`\alpha = 0.05` for :math:`n_{df}` degrees of freedom.
+A rejection is interpreted as evidence that
 Algorithm B improves BTR over Algorithm A and justifies the rollout.
 A non-rejection means production stays on Algorithm A.
 
@@ -269,3 +277,9 @@ where one algorithm is leaking users compared to the other and at
 which stage the gap (if any) opens up. This view complements the BTR
 chart: BTR shows *whether* the new algorithm is better, the Sankey
 shows *where* the difference is coming from.
+
+
+References
+----------
+
+.. [Hagemeyer2025] Hagemeyer, C. *Online Evaluation Techniques for Bundle Recommender Algorithms*. Projektseminar, 23. Oktober 2025.
