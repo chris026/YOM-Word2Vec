@@ -7,13 +7,13 @@ Overview
 This quick start runs the full pipeline end to end:
 
 1. Train Word2Vec and LightGBM models
-2. Start the local recommendation API
+2. Get a bundle recommendation via ``serve_bundle.py``
 
 Why this order
 --------------
 
-The serving layer loads both trained model files at startup.
-The pipeline must complete before the API can serve recommendations.
+``serve_bundle.py`` loads the trained model files from ``models/``.
+The pipeline must complete before recommendations can be generated.
 
 Requirements
 ------------
@@ -34,6 +34,37 @@ Setup
    venv\Scripts\activate          # Windows
    # source venv/bin/activate     # macOS / Linux
    pip install -r requirements.txt
+
+Prepare data
+------------
+
+Create the ``data/`` directory in the project root and place the three required
+CSV files inside it:
+
+.. code-block:: bash
+
+   mkdir data
+
+Then copy or move the following files into that folder:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - File
+     - Description
+   * - ``data/products_v2.csv``
+     - Product catalogue (product IDs, names, categories, blocked flags)
+   * - ``data/commerces.csv``
+     - Kiosk/commerce master data
+   * - ``data/2024-20250001_part_00-001.csv``
+     - Order event data (the filename may differ; any ``*.csv`` matching the
+       order export format is accepted)
+
+.. note::
+
+   Only one order CSV is required to get started. You can place additional order files
+   in the same ``data/`` folder and pick them later in the process.
 
 Choosing a pipeline
 -------------------
@@ -122,34 +153,42 @@ Main outputs:
 - ``models/lgbm_ranker.txt``
 - ``artifacts/`` — intermediate Parquet files
 
-Step 2 — Local API
-------------------
+Step 2 — Get a bundle recommendation
+-------------------------------------
+
+Open ``serve_bundle.py`` and edit the ``__main__`` block at the bottom to use
+a product ID and kiosk ID from your data:
+
+.. code-block:: python
+
+   # serve_bundle.py — __main__ block
+   print(getSingleRec("<anchor_product_id>", "<kiosk_id>", topn=8, addDebugInfo=False))
+
+Then run the script:
 
 .. code-block:: bash
 
-   cd backend
-   uvicorn src.app:app --reload
+   python serve_bundle.py
 
-Endpoints:
-
-- ``GET /health``
-- ``GET /recommendations``
-- ``POST /recommendations/multi``
-- ``GET /docs`` — interactive Swagger UI
-
-Recommendation request format:
+The output lists the anchor product followed by a ranked table of recommended
+product IDs and names:
 
 .. code-block:: text
 
-   GET /recommendations?kioskId=<kiosk_id>&anchorId=<anchor_product_id>&limit=<N>
+   Eingabeprodukt: 000295-999 | <product name>
+    productid                          name     score
+    000295-003             <product name>  0.92...
+    ...
+
+For batch recommendations (multiple anchor–kiosk pairs at once), use
+``getMultiRec()`` with a Polars DataFrame that has columns ``anchor_pid`` and
+``userid``.
 
 Verification
 ------------
 
-.. code-block:: bash
-
-   curl http://localhost:8000/health
-   curl "http://localhost:8000/recommendations?kioskId=<kiosk_id>&anchorId=<anchor_id>&limit=10"
+After running ``python serve_bundle.py``, a non-empty recommendation table
+confirms that both models loaded correctly and inference is working.
 
 Next steps
 ----------
