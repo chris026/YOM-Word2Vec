@@ -45,4 +45,12 @@ html_theme_options = {
     'style_nav_header_background': '#2862a3',
 }
 
+html_context = {
+    'display_github': True,
+    'github_user': 'chris026',
+    'github_repo': 'YOM-Word2Vec',
+    'github_version': 'main',
+    'conf_py_path': '/docs/',
+}
+
 html_static_path = []
