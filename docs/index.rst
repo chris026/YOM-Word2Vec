@@ -12,8 +12,7 @@ for candidate retrieval; a **LightGBM ranker** re-ranks the candidates
 using store context and popularity signals to personalise results at the
 kiosk level.
 
-Training is orchestrated with ZenML and runs locally. The trained models
-are bundled into a Docker image and served via FastAPI on AWS Lambda.
+Training is orchestrated with ZenML and runs locally.
 Inference is a nearest-neighbour lookup followed by a single LightGBM
 predict call and completes in milliseconds.
 
@@ -78,5 +77,4 @@ Indices and tables
 ==================
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
